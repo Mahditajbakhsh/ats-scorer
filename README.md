@@ -1,91 +1,93 @@
 # ATS Scorer
 
-سنجش تطابق رزومه با آگهی شغلی، شبیه‌سازی آنچه ATSها می‌سنجند. روی Cloudflare Workers اجرا می‌شود.
+Scores how well a CV matches a job ad, simulating what applicant tracking systems (ATS) look at. Runs on Cloudflare Workers.
 
-نسخه آنلاین: https://ats-scorer.mahditajbakhsh71.workers.dev
+Live: https://ats-scorer.mahditajbakhsh71.workers.dev
 
-* **نمره کلمه‌محور** کاملاً در مرورگر محاسبه می‌شود (`public/engine.js`). هفت بخش دارد: کلمات کلیدی، عنوان شغلی، مدرک، سابقه، زبان، سازگاری تاریخ‌ها، خوانایی فایل.
-* **شرط‌های حذفی** (زبان الزامی، مدرک، سال‌های سابقه، مجوز کار، گواهینامه) جدا از نمره با وضعیت قبول، رد یا نامعلوم نشان داده می‌شوند. نبودن اطلاعات رد حساب نمی‌شود. (ایده از sliday/resume-job-matcher)
-* **سازگاری تاریخ‌ها:** تاریخ پایان قبل از شروع، تاریخ آینده، قالب‌های ناهمسان و فاصله‌های بیش از ۶ ماه. (معیار مشابه در srbhr/Resume-Matcher)
-* **بهبود رزومه:** کمبودها به شکل سؤال پرسیده می‌شوند و فقط موارد تأییدشده وارد رزومه می‌شوند. Claude از مسیر `/api/improve` بازنویسی می‌کند و هر خط پیشنهادی باید به خط منبعش در رزومه (L#) یا پاسخ کاربر (U#) ارجاع دهد. مرورگر هر پیشنهاد را دوباره بررسی می‌کند و اگر عدد، مهارت یا اختصاری داشته باشد که در منبعش نیست، ردش می‌کند. واژه‌هایی مثل led یا managed هم که در منبع نیامده‌اند هشدار می‌گیرند. در پایان نمره قبل و بعد مقایسه می‌شود. (ایده از ebarti/JobCtrl؛ فقط ایده، نه کد)
-* **تحلیل معنایی با Claude** از مسیر `/api/analyze` در Worker انجام می‌شود و کلید Anthropic فقط روی سرور می‌ماند.
-* **دو زبانه:** کل رابط و گزارش، و خروجی Claude، با یک دکمه بین فارسی و انگلیسی عوض می‌شود. انتخاب در مرورگر ذخیره می‌شود.
-* رزومه و آگهی هیچ‌جا ذخیره نمی‌شوند.
+## Features
 
-## ساختار
+* **Rule-based score**, computed entirely in the browser (`public/engine.js`). Seven parts: keywords, job title, degree, years of experience, languages, date consistency and file readability.
+* **Knockout criteria** (required language, degree, years of experience, work permit, driving licence) are shown separately from the score as pass, fail or unknown. Missing information counts as unknown, not as a fail. (Idea from [sliday/resume-job-matcher](https://github.com/sliday/resume-job-matcher).)
+* **Date consistency:** end before start, future dates, mixed date formats and gaps of more than 6 months. Study periods are not counted as gaps. (A similar criterion exists in [srbhr/Resume-Matcher](https://github.com/srbhr/Resume-Matcher).)
+* **File checks:** PDF and DOCX are parsed in the browser (pdf.js, mammoth). Image-only PDFs, likely multi-column layouts, tables and icon glyphs are flagged, and the extracted text is shown as an ATS parser would see it.
+* **Semantic analysis** through `/api/analyze`: an LLM checks every requirement of the ad against the CV and must quote the CV as evidence. The Anthropic API key stays on the server.
+* **CV improvement** through `/api/improve`: missing keywords are turned into questions, and only items the user confirms are used. Every suggested line must cite its source, either a numbered CV line (`L#`) or a confirmed answer (`U#`). The browser re-checks each suggestion and rejects it if it contains a number, known skill or acronym that is not in its sources; unsupported seniority words such as "led" or "managed" get a warning. Scores before and after are compared. (Idea from [ebarti/JobCtrl](https://github.com/ebarti/JobCtrl); idea only, no code.)
+* **Persian and English:** the whole interface, the report and the model output switch with one button. The choice is kept in the browser.
+* CVs and job ads are not stored anywhere.
+
+## Project structure
 
 ```
-public/            فایل‌های استاتیک (Workers Static Assets)
+public/            static files (Workers Static Assets)
   index.html
-  i18n.js          متن‌های رابط به فارسی و انگلیسی
+  i18n.js          interface strings in Persian and English
   styles.css
-  engine.js        موتور نمره کلمه‌محور (بدون وابستگی، در Node هم اجرا می‌شود)
-  app.js           رابط کاربری، خواندن PDF/DOCX، فراخوانی API
-src/worker.js      مسیرهای /api/status و /api/analyze
-test/              تست‌های موتور (node --test)
+  engine.js        rule-based scoring engine (no dependencies, also runs in Node)
+  app.js           interface, PDF/DOCX reading, API calls
+src/worker.js      /api/status, /api/analyze and /api/improve
+test/              engine tests (node --test)
 wrangler.toml
 ```
 
-## پیش‌نیازها
+## Requirements
 
-* حساب Cloudflare
-* Node.js نسخه ۱۸ یا بالاتر
-* کلید API از console.anthropic.com (فقط برای تحلیل معنایی؛ هزینه API جدا از اشتراک Claude حساب می‌شود)
+* A Cloudflare account
+* Node.js 18 or later
+* An API key from the Claude Console (only for semantic analysis and CV improvement; API usage is billed separately from a Claude subscription)
 
-## راه‌اندازی
+## Setup
 
 ```bash
 npm install
 npx wrangler login
 
-# کلید Anthropic (اجباری برای تحلیل معنایی)
+# Anthropic API key (required for semantic analysis and CV improvement)
 npx wrangler secret put ANTHROPIC_API_KEY
 
-# رمز دسترسی (به‌شدت توصیه می‌شود؛ بدون آن هر کسی که آدرس را داشته باشد می‌تواند از کلید شما استفاده کند)
+# Access password (strongly recommended; without it anyone with the URL can spend your API credit)
 npx wrangler secret put ACCESS_TOKEN
 
 npm run deploy
 ```
 
-بعد از deploy آدرسی شبیه `https://ats-scorer.<your-subdomain>.workers.dev` می‌گیرید. اولین بار که تحلیل معنایی را اجرا می‌کنید، رمز دسترسی را در صفحه وارد کنید. رمز در همان مرورگر ذخیره می‌شود.
+After deploying you get a URL like `https://ats-scorer.<your-subdomain>.workers.dev`. Enter the access password on the page the first time you run the semantic analysis; it is remembered in that browser.
 
-اگر کلید Anthropic تنظیم نشود، صفحه کار می‌کند ولی فقط نمره کلمه‌محور را نشان می‌دهد.
+Without an Anthropic key the page still works and shows the rule-based score only.
 
-## استقرار خودکار
+## Automatic deployment
 
-این مخزن به Worker به نام `ats-scorer` در Cloudflare (Workers Builds) وصل است. هر push روی شاخه `main` به‌طور خودکار با `npx wrangler deploy` منتشر می‌شود. secretها (`ANTHROPIC_API_KEY` و `ACCESS_TOKEN`) در داشبورد Cloudflare تنظیم می‌شوند و با deploy پاک نمی‌شوند.
+This repository is connected to the `ats-scorer` Worker through Cloudflare Workers Builds. Every push to `main` is deployed with `npx wrangler deploy`. Secrets (`ANTHROPIC_API_KEY`, `ACCESS_TOKEN`) are set in the Cloudflare dashboard and are kept across deploys.
 
-## اجرای محلی
+## Local development
 
 ```bash
-cp .dev.vars.example .dev.vars   # کلید و رمز را داخلش بنویسید
+cp .dev.vars.example .dev.vars   # put your key and password in it
 npm run dev                      # http://localhost:8787
-npm test                         # تست‌های موتور نمره
+npm test                         # scoring engine tests
 ```
 
-## تنظیمات (wrangler.toml، بخش [vars])
+## Configuration (`wrangler.toml`, `[vars]`)
 
-| متغیر | پیش‌فرض | توضیح |
+| Variable | Default | Description |
 |---|---|---|
-| `MODEL` | `claude-sonnet-5-5` | مدل Claude؛ برای تحلیل دقیق‌تر `claude-opus-5-5`، برای ارزان‌تر `claude-haiku-5-5` |
-| `ANTHROPIC_VERSION` | `2026-10-21` | نسخه API (طبق platform.claude.com/docs/en/api/versioning در نوامبر ۲۰۲۶) |
-| `ANTHROPIC_BASE_URL` | `https://api.anthropic.com` | اختیاری؛ مثلاً برای عبور از Cloudflare AI Gateway |
-| `MAX_CV_CHARS` / `MAX_JD_CHARS` | `18000` / `12000` | سقف طول متنی که برای Claude فرستاده می‌شود |
+| `MODEL` | `claude-sonnet-5-5` | Model id; `claude-opus-5-5` for more thorough analysis, `claude-haiku-5-5` for lower cost |
+| `ANTHROPIC_VERSION` | `2026-10-21` | API version header (per platform.claude.com/docs/en/api/versioning, November 2026) |
+| `ANTHROPIC_BASE_URL` | `https://api.anthropic.com` | Optional, e.g. to route through Cloudflare AI Gateway |
+| `MAX_CV_CHARS` / `MAX_JD_CHARS` | `18000` / `12000` | Maximum text length sent to the model |
 
-## امنیت
+## Security
 
-* `ACCESS_TOKEN` جلوی استفاده دیگران از کلید API را می‌گیرد. مقایسه آن در Worker زمان‌ثابت است.
-* برای قفل کردن کل اپ (نه فقط API) می‌توانید Cloudflare Access (Zero Trust) را روی دامنه فعال کنید. برای وب‌اپ شخصی این بهترین گزینه است.
-* خروجی مدل پیش از ارسال به صفحه به فیلدهای مشخص محدود می‌شود و صفحه همه متن‌ها را escape می‌کند.
+* `ACCESS_TOKEN` stops other people from using your API key. It is compared in constant time in the Worker.
+* To lock the whole app, not only the API, enable Cloudflare Access (Zero Trust) on the domain. This is the best option for a personal app.
+* Model output is reduced to known fields before it reaches the page, and the page escapes all text.
+* Job ad and CV text are passed to the model as data with an instruction to ignore any instructions inside them.
 
-## اضافه کردن به وب‌اپ شخصی
+## Embedding in another app
 
-دو راه:
+1. **Separate Worker on a subdomain**, e.g. `ats.yourdomain.com` (Cloudflare dashboard: Workers › Settings › Domains & Routes). The simplest option.
+2. **Inside an existing Worker:** copy `public/` into a folder such as `public/ats/` and add the `/api/status`, `/api/analyze` and `/api/improve` routes from `src/worker.js` to your router. URLs in `app.js` are relative (`api/status`), so if the page lives under `/ats/`, serve the API under `/ats/api/...` or change the paths in `app.js`.
 
-1. **Worker جدا روی زیردامنه**، مثلاً `ats.yourdomain.com` (در داشبورد Cloudflare: Workers › Settings › Domains & Routes). ساده‌ترین راه است.
-2. **ادغام در Worker اصلی اپ:** محتوای `public/` را در یک پوشه مثل `public/ats/` بگذارید و دو مسیر `/api/status` و `/api/analyze` را از `src/worker.js` به روتر اپ اضافه کنید. در `app.js` آدرس‌ها نسبی‌اند (`api/status`)، پس اگر صفحه در `/ats/` باشد، API را در `/ats/api/...` تعریف کنید یا آدرس‌ها را در `app.js` عوض کنید.
+## Notes
 
-## یادداشت‌ها
-
-* کتابخانه‌های pdf.js (3.11.174) و mammoth (1.6.0) از jsDelivr بارگذاری می‌شوند.
-* وزن‌ها و آستانه‌های نمره انتخاب طراحی این ابزارند، نه عدد رسمی یک ATS خاص. جزئیات در بخش «روش محاسبه» صفحه آمده است.
+* pdf.js (3.11.174) and mammoth (1.6.0) are loaded from jsDelivr.
+* The weights and thresholds are design choices of this tool, not official numbers of any ATS. The real algorithms of Workday, Taleo and others are not public. Details are in the "How the score is calculated" section of the page. Use the score to compare versions of your own CV for one ad, not to predict an outcome.

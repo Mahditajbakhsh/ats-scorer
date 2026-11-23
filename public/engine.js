@@ -714,6 +714,7 @@
     return out;
   }
   const NUM_RE = /\d+(?:[.,]\d+)?\s?%?/g;
+  const SENIOR_RE = /\b(led|lead|leading|managed|managing|supervised|supervising|headed|spearheaded|directed|oversaw|owned|coordinated|mentored|trained)\b/gi;
   // A suggestion is accepted only if its numbers, known skills and acronyms all appear in its cited sources.
   function validateSuggestion(text, sourceTexts, lang) {
     if (lang) LANG = lang === "en" ? "en" : "fa";
@@ -731,7 +732,7 @@
     const srcLower = src.toLowerCase();
     const acr = new Set(String(text).match(/(?<![A-Za-z0-9])[A-Z][A-Z0-9]{1,}(?:-[A-Z0-9]+)?(?![a-z0-9])/g) || []);
     acr.forEach((a) => { if (!srcLower.includes(a.toLowerCase())) errors.push(tr(`«${a}» در منبع نیست`, `\u201c${a}\u201d is not in the sources`)); });
-    const SENIOR = /\b(led|lead|leading|managed|managing|supervised|supervising|headed|spearheaded|directed|oversaw|owned|coordinated|mentored|trained)\b/gi;
+    const SENIOR = SENIOR_RE;
     (String(text).match(SENIOR) || []).forEach((w) => { if (!new RegExp("\\b" + w + "\\b", "i").test(src)) warnings.push(tr(`«${w}» نقش یا مسئولیتی را نشان می‌دهد که در منبع نیامده؛ فقط اگر واقعاً درست است نگه دارید`, `\u201c${w}\u201d implies a role or responsibility the source does not state; keep it only if it is true`)); });
     const words = String(text).replace(/^[\s•\-*]+/, "").split(/\s+/);
     words.forEach((w, i) => {
@@ -789,6 +790,77 @@
     return text;
   }
 
+  // ---------- Application email helpers ----------
+  // Verified facts for the email, taken verbatim from CV lines (F1, F2, ...). The model may use only these.
+  function buildEmailFacts(cv, result) {
+    const lines = String(cv || "").replace(/\r/g, "").split("\n").map((l) => l.trim());
+    const sections = detectSections(cv);
+    const facts = [];
+    const add = (label, text) => { const t = String(text || "").trim(); if (t && !facts.some((f) => f.text === t)) facts.push({ id: "F" + (facts.length + 1), label, text: t.slice(0, 300) }); };
+    const name = lines.find(Boolean);
+    add("name", name);
+    const em = String(cv).match(/[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}/);
+    if (em) add("email", em[0]);
+    const ph = String(cv).match(/\+\d[\d\s\-()]{6,18}\d/);
+    if (ph) add("phone", ph[0]);
+    if (sections.summary) add("profile", sections.summary.text.split("\n").map((x) => x.trim()).find(Boolean));
+    if (sections.experience) {
+      sections.experience.text.split("\n").map((x) => x.trim()).filter((x) => x && parseRanges(x).length).slice(0, 3).forEach((x) => add("role", x));
+    }
+    if (sections.education) {
+      const ed = sections.education.text.split("\n").map((x) => x.trim()).filter((x) => x && EDU.some((e) => e.re.test(x)));
+      ed.sort((a, b) => Math.max(...EDU.filter((e) => e.re.test(b)).map((e) => e.lvl)) - Math.max(...EDU.filter((e) => e.re.test(a)).map((e) => e.lvl)));
+      if (ed[0]) add("degree", ed[0]);
+    }
+    if (result && Array.isArray(result.keywords)) {
+      const ncv = norm(cv);
+      result.keywords.filter((k) => k.hit && !k.soft && k.skill).sort((a, b) => b.weight - a.weight).slice(0, 6).forEach((k) => {
+        const line = lines.find((l) => l && skillCount(k.skill, l, norm(l)) > 0 && !/^(skills|technical skills)$/i.test(l));
+        if (line) add("evidence for " + k.name, line);
+      });
+      void ncv;
+    }
+    if (sections.languages) add("languages", sections.languages.text.split("\n").map((x) => x.trim()).filter(Boolean).join("; "));
+    return facts;
+  }
+
+  const EMAIL_ACRO_OK = new Set(["CV", "PDF", "DOCX", "PS", "EU", "ID", "RE"]);
+  const FILLER = /\b(passionate|passion|excited|thrilled|dynamic|hard[- ]?working|perfect fit|ideal candidate|highly motivated|results[- ]driven|go[- ]getter|dream job|team player|eager)\b/gi;
+  const EMAIL_WORDS_OK = new Set(["dear", "hiring", "manager", "team", "sincerely", "regards", "best", "kind", "thank", "thanks", "please", "attached", "position", "application", "cv", "resume", "the", "i", "my", "yours", "hello", "hi", "subject", "monday", "tuesday", "wednesday", "thursday", "friday", "january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december", "english", "finnish", "swedish"]);
+  // Email check: max words; numbers and acronyms must come from the facts or the ad; skills only from the facts (the CV).
+  function validateEmail(body, factTexts, jd, opts) {
+    opts = opts || {};
+    if (opts.lang) LANG = opts.lang === "en" ? "en" : "fa";
+    const maxWords = opts.maxWords || 150;
+    const errors = [], warnings = [];
+    const facts = factTexts.join("\n");
+    const both = facts + "\n" + String(jd || "");
+    const bothLower = both.toLowerCase();
+    const words = String(body).trim().split(/\s+/).filter(Boolean).length;
+    if (words > maxWords) errors.push(tr(`${words} کلمه؛ بیشتر از سقف ${maxWords}`, `${words} words; over the ${maxWords} limit`));
+    const bothNums = new Set((both.match(NUM_RE) || []).map((x) => x.replace(/\s/g, "").replace(",", ".")));
+    (String(body).match(NUM_RE) || []).map((x) => x.replace(/\s/g, "")).forEach((n) => { if (!bothNums.has(n.replace(",", "."))) errors.push(tr(`عدد «${n}» نه در رزومه است نه در آگهی`, `number “${n}” is in neither the CV facts nor the ad`)); });
+    const nb = norm(body), nf = norm(facts);
+    for (const sk of SKILLS) {
+      if (sk.soft) continue;
+      if (skillCount(sk, body, nb) > 0 && skillCount(sk, facts, nf) === 0) errors.push(tr(`«${sk.k}» در اطلاعات رزومه نیست`, `“${sk.k}” is not in the CV facts`));
+    }
+    new Set(String(body).match(/(?<![A-Za-z0-9])[A-Z][A-Z0-9]{1,}(?:-[A-Z0-9]+)?(?![a-z0-9])/g) || []).forEach((a) => {
+      if (!EMAIL_ACRO_OK.has(a) && !bothLower.includes(a.toLowerCase())) errors.push(tr(`«${a}» نه در رزومه است نه در آگهی`, `“${a}” is in neither the CV facts nor the ad`));
+    });
+    (String(body).match(SENIOR_RE) || []).forEach((w) => { if (!new RegExp("\\b" + w + "\\b", "i").test(facts)) warnings.push(tr(`«${w}» در رزومه نیامده`, `“${w}” is not stated in the CV`)); });
+    const fill = [...new Set((String(body).match(FILLER) || []).map((x) => x.toLowerCase()))];
+    if (fill.length) warnings.push(tr("واژه‌های تعریفی بی‌اطلاعات: ", "Subjective filler words: ") + fill.join(", "));
+    const toks = String(body).split(/\s+/);
+    toks.forEach((w, i) => {
+      const c = w.replace(/[^A-Za-z\-]/g, "");
+      if (i === 0 || c.length < 3 || !/^[A-Z][a-z]/.test(c) || EMAIL_WORDS_OK.has(c.toLowerCase())) return;
+      if (/[.!?:,]$/.test(toks[i - 1] || "") || /^\n/.test(w)) return;
+      if (!bothLower.includes(c.toLowerCase())) warnings.push(tr(`«${c}» در رزومه یا آگهی نیست؛ بررسی کنید`, `“${c}” is not in the CV or the ad; check it`));
+    });
+    return { ok: errors.length === 0, errors: [...new Set(errors)], warnings: [...new Set(warnings)], words };
+  }
+
   function guessTitle(jd) {
     const lines = String(jd || "").split("\n").map((s) => s.trim()).filter(Boolean);
     for (const l of lines.slice(0, 4)) {
@@ -799,5 +871,5 @@
     return "";
   }
 
-  root.ATS = { score, extractJDKeywords, detectSections, experienceMonths, parseRanges, dateConsistency, jdYears, jdEducation, norm, SKILLS, guessTitle, hasR, cvLines, validateSuggestion, applyImprovements, skillCount: (k, t) => { const s = SKILLS.find((x) => x.k === k); return s ? skillCount(s, t, norm(t)) : 0; } };
+  root.ATS = { score, extractJDKeywords, detectSections, experienceMonths, parseRanges, dateConsistency, jdYears, jdEducation, norm, SKILLS, guessTitle, hasR, cvLines, validateSuggestion, applyImprovements, buildEmailFacts, validateEmail, skillCount: (k, t) => { const s = SKILLS.find((x) => x.k === k); return s ? skillCount(s, t, norm(t)) : 0; } };
 })(typeof window !== "undefined" ? window : globalThis);

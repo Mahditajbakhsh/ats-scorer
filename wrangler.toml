@@ -11,6 +11,10 @@ MODEL = "claude-sonnet-5-5"
 ANTHROPIC_VERSION = "2026-10-21"
 MAX_CV_CHARS = "18000"
 MAX_JD_CHARS = "12000"
+EMAIL_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast"
 
 [observability]
 enabled = true
+
+[ai]
+binding = "AI"

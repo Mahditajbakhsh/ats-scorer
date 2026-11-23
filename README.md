@@ -13,6 +13,7 @@ Live: https://ats-scorer.mahditajbakhsh71.workers.dev
 * **Semantic analysis** through `/api/analyze`: an LLM checks every requirement of the ad against the CV and must quote the CV as evidence. The Anthropic API key stays on the server.
 * **CV improvement** through `/api/improve`: missing keywords are turned into questions, and only items the user confirms are used. Every suggested line must cite its source, either a numbered CV line (`L#`) or a confirmed answer (`U#`). The browser re-checks each suggestion and rejects it if it contains a number, known skill or acronym that is not in its sources; unsupported seniority words such as "led" or "managed" get a warning. Scores before and after are compared. (Idea from [ebarti/JobCtrl](https://github.com/ebarti/JobCtrl); idea only, no code.)
 * **PDF export:** the improved CV can be downloaded as a single-column PDF with real, selectable text (jsPDF, built in the browser, no API call). The PDF is read back with the same parser and re-scored to confirm nothing was lost. Only Latin characters are supported by the standard PDF font; any others are reported.
+* **Application email** through `/api/email`, written with Llama 3.3 70B on Cloudflare Workers AI (free daily allocation, no Anthropic cost). The model only receives a short list of facts taken verbatim from the CV (name, contact, roles with dates, degree, lines that prove the matched skills, languages). The body is limited to 150 words (one automatic shorter retry), and the browser rejects the email if it contains a number, skill or acronym that is not in those facts or the ad; self-praise filler and unsupported seniority words get a warning.
 * **Persian and English:** the whole interface, the report and the model output switch with one button. The choice is kept in the browser.
 * CVs and job ads are not stored anywhere.
 
@@ -26,7 +27,7 @@ public/            static files (Workers Static Assets)
   engine.js        rule-based scoring engine (no dependencies, also runs in Node)
   app.js           interface, PDF/DOCX reading, API calls
   pdf.js           PDF export of the improved CV
-src/worker.js      /api/status, /api/analyze and /api/improve
+src/worker.js      /api/status, /api/analyze, /api/improve and /api/email
 test/              engine tests (node --test)
 wrangler.toml
 ```
@@ -36,6 +37,7 @@ wrangler.toml
 * A Cloudflare account
 * Node.js 18 or later
 * An API key from the Claude Console (only for semantic analysis and CV improvement; API usage is billed separately from a Claude subscription)
+* Workers AI (for the application email) is enabled through the `[ai]` binding in `wrangler.toml`; no key is needed
 
 ## Setup
 
@@ -65,7 +67,7 @@ This repository is connected to the `ats-scorer` Worker through Cloudflare Worke
 ```bash
 cp .dev.vars.example .dev.vars   # put your key and password in it
 npm run dev                      # http://localhost:8787
-npm test                         # scoring engine tests
+npm test                         # engine and Worker route tests
 ```
 
 ## Configuration (`wrangler.toml`, `[vars]`)
@@ -76,6 +78,7 @@ npm test                         # scoring engine tests
 | `ANTHROPIC_VERSION` | `2026-10-21` | API version header (per platform.claude.com/docs/en/api/versioning, November 2026) |
 | `ANTHROPIC_BASE_URL` | `https://api.anthropic.com` | Optional, e.g. to route through Cloudflare AI Gateway |
 | `MAX_CV_CHARS` / `MAX_JD_CHARS` | `18000` / `12000` | Maximum text length sent to the model |
+| `EMAIL_MODEL` | `@cf/meta/llama-3.3-70b-instruct-fp8-fast` | Workers AI model for the application email |
 
 ## Security
 

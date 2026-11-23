@@ -202,3 +202,21 @@ test("English report: labels, gate and validation messages contain no Persian", 
   // the default stays Persian
   assert.match(ATS.score(CV, JD_LAB, { now: NOW }).components.keywords.label, /[؀-ۿ]/);
 });
+
+// ---------- Application email ----------
+test("email facts are verbatim CV lines; validation rejects invented content", () => {
+  const r = ATS.score(CV, JD_LAB, { now: NOW, lang: "en" });
+  const F = ATS.buildEmailFacts(CV, r);
+  const texts = F.map((f) => f.text);
+  texts.forEach((t) => assert.ok(CV.includes(t.replace(/; /g, ", ")) || CV.split("\n").some((l) => l.trim() === t) || /English/.test(t), "fact comes from the CV: " + t));
+  assert.ok(F.some((f) => f.label === "name" && f.text === "Mahdi Example"));
+  const good = "Dear Hiring Manager,\n\nI am applying for the Laboratory Engineer, Chemistry position at Eurofins Ahma Oy. I worked as a Laboratory Researcher at Example Institute (Jan 2020 – Dec 2022) on HPLC analysis and method development, and wrote SOPs. My CV is attached.\n\nKind regards,\nMahdi Example";
+  const v = ATS.validateEmail(good, texts, JD_LAB, { lang: "en" });
+  assert.ok(v.ok, JSON.stringify(v));
+  const bad = ATS.validateEmail("I am a passionate chemist with 5 years of LIMS experience and led a team.", texts, JD_LAB, { lang: "en" });
+  assert.ok(!bad.ok);
+  assert.ok(bad.errors.some((e) => e.includes("5")) && bad.errors.some((e) => e.includes("LIMS")));
+  assert.ok(bad.warnings.some((w) => w.includes("passionate")) && bad.warnings.some((w) => w.includes("led")));
+  const long = ATS.validateEmail(Array.from({ length: 160 }, () => "word").join(" "), texts, JD_LAB, { lang: "en" });
+  assert.ok(!long.ok && long.words === 160);
+});

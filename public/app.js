@@ -161,7 +161,7 @@ function render(r, cvText, opts){
   if (!opts.keepImprove) renderQuestions(r);
   $("parsed").textContent = cvText;
   $("secs").innerHTML = r.sections.length ? r.sections.map((s) => `<bdi>${esc(s)}</bdi>`).join(T("list")) : esc(T("noneSecs"));
-  if (!opts.keepImprove) { $("aiOut").innerHTML = ""; if (aiReady) $("aiStatus").textContent = ""; }
+  if (!opts.keepImprove) { $("aiOut").innerHTML = ""; if (aiReady) $("aiStatus").textContent = ""; $("emailOut").innerHTML = ""; $("emailStatus").textContent = ""; }
   if (!opts.noScroll) $("results").scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
@@ -219,18 +219,18 @@ $("langBtn").addEventListener("click", () => {
 
 // ---------- Semantic analysis (via this app's Worker API) ----------
 const TOKEN_KEY = "ats_access_token";
-let aiReady = false, needToken = false, aiStatusKey = "checking";
+let aiReady = false, needToken = false, aiStatusKey = "checking", emailReady = false;
 function getToken(){ try { return localStorage.getItem(TOKEN_KEY) || ""; } catch (e) { return ""; } }
 function setToken(v){ try { v ? localStorage.setItem(TOKEN_KEY, v) : localStorage.removeItem(TOKEN_KEY); } catch (e) {} }
 function showAiStatus(){ $("aiStatus").textContent = aiStatusKey ? T(aiStatusKey) : ""; }
 $("aiBtn").style.display = "none";
 showAiStatus();
 fetch("api/status").then((r) => r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status))).then((st) => {
-  aiReady = !!st.ai; needToken = !!st.auth;
+  aiReady = !!st.ai; needToken = !!st.auth; emailReady = !!st.email;
+  if (needToken) { $("tokenRow").style.display = ""; $("token").value = getToken(); }
   if (!aiReady) { aiStatusKey = "noKey"; showAiStatus(); return; }
   aiStatusKey = null; showAiStatus();
   $("aiBtn").style.display = "";
-  if (needToken) { $("tokenRow").style.display = ""; $("token").value = getToken(); }
 }).catch(() => { aiStatusKey = "noApi"; showAiStatus(); });
 $("token").addEventListener("change", () => setToken($("token").value.trim()));
 
@@ -284,6 +284,48 @@ function renderAi(d){
   if (rs.length) h += `<div class="box tip"><h3>${esc(T("rewriteH"))}</h3><ul class="list">${rs.map((s) => `<li><b><bdi>${esc(s.section || "")}</bdi></b>: ${esc(s.suggestion || "")}${s.based_on ? ` <span class="note">(${esc(T("basedOn"))}: <bdi>${esc(s.based_on)}</bdi>)</span>` : ""}</li>`).join("")}</ul></div>`;
   h += `<p class="note">${esc(T("aiDisclaimer"))}</p>`;
   $("aiOut").innerHTML = h;
+}
+
+// ---------- Application email (Workers AI, Llama) ----------
+let emailBusy = false;
+$("emailBtn").addEventListener("click", async () => {
+  if (emailBusy) return;
+  if (!lastResult || !lastInputs) { $("emailStatus").innerHTML = `<span class="err">${esc(T("scoreFirst"))}</span>`; return; }
+  if (!emailReady) { $("emailStatus").innerHTML = `<span class="err">${esc(T("emailNoAI"))}</span>`; return; }
+  const facts = ATS.buildEmailFacts(lastInputs.cv, lastResult);
+  emailBusy = true; $("emailBtn").disabled = true;
+  $("emailStatus").innerHTML = ' <span class="spinner"></span> ' + esc(T("emailWriting"));
+  $("emailOut").innerHTML = "";
+  try {
+    if (needToken && !$("token").value.trim()) throw new Error(T("tokenFirst"));
+    const title = lastInputs.title || ATS.guessTitle(lastInputs.jd);
+    const d = await postJson("api/email", { jd: lastInputs.jd, facts, title, lang: I18N.lang });
+    renderEmail(d, facts);
+    $("emailStatus").textContent = "";
+  } catch (e) {
+    $("emailStatus").innerHTML = `<span class="err">${esc(T("emailFailed"))}${esc((e && e.message) || e)}</span>`;
+  } finally { emailBusy = false; $("emailBtn").disabled = false; }
+});
+function renderEmail(d, facts){
+  const v = ATS.validateEmail(d.body, facts.map((f) => f.text), lastInputs.jd, { lang: I18N.lang, maxWords: 150 });
+  const sv = ATS.validateEmail(d.subject, facts.map((f) => f.text), lastInputs.jd, { lang: I18N.lang, maxWords: 30 });
+  const errors = [...v.errors, ...sv.errors], warnings = [...new Set([...v.warnings, ...sv.warnings])];
+  const ok = errors.length === 0;
+  const to = (lastInputs.jd.match(/[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}/) || [""])[0];
+  let h = `<div class="mail ${ok ? "" : "rej"}"><div class="subj">${esc(d.subject)}</div><div class="body">${esc(d.body)}</div></div>`;
+  h += `<p class="note">${esc(T("emailWords", { n: N(v.words), max: N(150) }))}${d.retried ? " · " + esc(T("emailRetried")) : ""}</p>`;
+  if (!ok) h += `<div class="box bad"><h3>${esc(T("emailRejected"))}</h3><ul class="list">${errors.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></div>`;
+  else h += `<p class="note" style="color:var(--good)">${esc(T("emailOk"))}</p>`;
+  if (warnings.length) h += `<div class="box warn"><h3>${esc(T("emailCheck"))}</h3><ul class="list">${warnings.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></div>`;
+  if (ok) {
+    h += `<div class="actions"><button class="btn ghost" id="mailCopyS">${esc(T("copySubject"))}</button><button class="btn ghost" id="mailCopyB">${esc(T("copyBody"))}</button>`;
+    if (to) h += `<a class="btn ghost" style="text-decoration:none" href="mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent(d.subject)}&body=${encodeURIComponent(d.body)}">${esc(T("openMail"))} (${esc(to)})</a>`;
+    h += `<span id="mailMsg" class="note"></span></div>`;
+  }
+  h += `<details><summary class="note">${esc(T("emailFacts", { n: N(facts.length) }))}</summary><ul class="list note">${facts.map((f) => `<li><bdi>${esc(f.id)} [${esc(f.label)}]: ${esc(f.text)}</bdi></li>`).join("")}</ul></details>`;
+  $("emailOut").innerHTML = h;
+  const copy = async (t) => { try { await navigator.clipboard.writeText(t); $("mailMsg").textContent = T("copied"); } catch (e) { $("mailMsg").textContent = T("copyFail"); } };
+  if (ok) { $("mailCopyS").addEventListener("click", () => copy(d.subject)); $("mailCopyB").addEventListener("click", () => copy(d.body)); }
 }
 
 // ---------- Improve mode ----------

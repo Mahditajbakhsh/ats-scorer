@@ -1,0 +1,80 @@
+# ATS Scorer
+
+سنجش تطابق رزومه با آگهی شغلی، شبیه‌سازی آنچه ATSها می‌سنجند. روی Cloudflare Workers اجرا می‌شود.
+
+* **نمره کلمه‌محور** کاملاً در مرورگر محاسبه می‌شود (`public/engine.js`). شش بخش دارد: کلمات کلیدی، عنوان شغلی، مدرک، سابقه، زبان، خوانایی فایل.
+* **تحلیل معنایی با Claude** از مسیر `/api/analyze` در Worker انجام می‌شود و کلید Anthropic فقط روی سرور می‌ماند.
+* رزومه و آگهی هیچ‌جا ذخیره نمی‌شوند.
+
+## ساختار
+
+```
+public/            فایل‌های استاتیک (Workers Static Assets)
+  index.html
+  styles.css
+  engine.js        موتور نمره کلمه‌محور (بدون وابستگی، در Node هم اجرا می‌شود)
+  app.js           رابط کاربری، خواندن PDF/DOCX، فراخوانی API
+src/worker.js      مسیرهای /api/status و /api/analyze
+test/              تست‌های موتور (node --test)
+wrangler.toml
+```
+
+## پیش‌نیازها
+
+* حساب Cloudflare
+* Node.js نسخه ۱۸ یا بالاتر
+* کلید API از console.anthropic.com (فقط برای تحلیل معنایی؛ هزینه API جدا از اشتراک Claude حساب می‌شود)
+
+## راه‌اندازی
+
+```bash
+npm install
+npx wrangler login
+
+# کلید Anthropic (اجباری برای تحلیل معنایی)
+npx wrangler secret put ANTHROPIC_API_KEY
+
+# رمز دسترسی (به‌شدت توصیه می‌شود؛ بدون آن هر کسی که آدرس را داشته باشد می‌تواند از کلید شما استفاده کند)
+npx wrangler secret put ACCESS_TOKEN
+
+npm run deploy
+```
+
+بعد از deploy آدرسی شبیه `https://ats-scorer.<your-subdomain>.workers.dev` می‌گیرید. اولین بار که تحلیل معنایی را اجرا می‌کنید، رمز دسترسی را در صفحه وارد کنید. رمز در همان مرورگر ذخیره می‌شود.
+
+اگر کلید Anthropic تنظیم نشود، صفحه کار می‌کند ولی فقط نمره کلمه‌محور را نشان می‌دهد.
+
+## اجرای محلی
+
+```bash
+cp .dev.vars.example .dev.vars   # کلید و رمز را داخلش بنویسید
+npm run dev                      # http://localhost:8787
+npm test                         # تست‌های موتور نمره
+```
+
+## تنظیمات (wrangler.toml، بخش [vars])
+
+| متغیر | پیش‌فرض | توضیح |
+|---|---|---|
+| `MODEL` | `claude-sonnet-5-5` | مدل Claude؛ برای تحلیل دقیق‌تر `claude-opus-5-5`، برای ارزان‌تر `claude-haiku-5-5` |
+| `ANTHROPIC_VERSION` | `2026-10-21` | نسخه API (طبق platform.claude.com/docs/en/api/versioning در نوامبر ۲۰۲۶) |
+| `ANTHROPIC_BASE_URL` | `https://api.anthropic.com` | اختیاری؛ مثلاً برای عبور از Cloudflare AI Gateway |
+| `MAX_CV_CHARS` / `MAX_JD_CHARS` | `18000` / `12000` | سقف طول متنی که برای Claude فرستاده می‌شود |
+
+## امنیت
+
+* `ACCESS_TOKEN` جلوی استفاده دیگران از کلید API را می‌گیرد. مقایسه آن در Worker زمان‌ثابت است.
+* برای قفل کردن کل اپ (نه فقط API) می‌توانید Cloudflare Access (Zero Trust) را روی دامنه فعال کنید. برای وب‌اپ شخصی این بهترین گزینه است.
+* خروجی مدل پیش از ارسال به صفحه به فیلدهای مشخص محدود می‌شود و صفحه همه متن‌ها را escape می‌کند.
+
+## اضافه کردن به وب‌اپ شخصی
+
+دو راه:
+
+1. **Worker جدا روی زیردامنه**، مثلاً `ats.yourdomain.com` (در داشبورد Cloudflare: Workers › Settings › Domains & Routes). ساده‌ترین راه است.
+2. **ادغام در Worker اصلی اپ:** محتوای `public/` را در یک پوشه مثل `public/ats/` بگذارید و دو مسیر `/api/status` و `/api/analyze` را از `src/worker.js` به روتر اپ اضافه کنید. در `app.js` آدرس‌ها نسبی‌اند (`api/status`)، پس اگر صفحه در `/ats/` باشد، API را در `/ats/api/...` تعریف کنید یا آدرس‌ها را در `app.js` عوض کنید.
+
+## یادداشت‌ها
+
+* کتابخانه‌های pdf.js (3.11.174) و mammoth (1.6.0) از jsDelivr بارگذاری می‌شوند.
+* وزن‌ها و آستانه‌های نمره انتخاب طراحی این ابزارند، نه عدد رسمی یک ATS خاص. جزئیات در بخش «روش محاسبه» صفحه آمده است.

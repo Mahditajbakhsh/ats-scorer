@@ -1,0 +1,607 @@
+// ATS Match Scorer engine. Pure functions, no DOM.
+(function (root) {
+  "use strict";
+
+  // ---------- Skill dictionary ----------
+  // k: display name, a: aliases (matched after normalization), c: category, soft: soft skill
+  const SKILLS = [
+    // Bioinformatics and genomics
+    { k: "Bioinformatics", a: ["bioinformatics", "bioinformatic", "bioinformatician", "computational biology", "computational biologist"], c: "bio" },
+    { k: "NGS", a: ["ngs", "next generation sequencing", "high throughput sequencing", "massively parallel sequencing"], c: "bio" },
+    { k: "RNA-seq", a: ["rna seq", "rnaseq", "rna sequencing", "transcriptome sequencing"], c: "bio" },
+    { k: "Single-cell RNA-seq", a: ["scrna seq", "scrnaseq", "single cell rna seq", "single cell rna sequencing", "single cell transcriptomics", "single cell sequencing", "single cell"], c: "bio" },
+    { k: "Spatial transcriptomics", a: ["spatial transcriptomics", "visium", "spatial omics", "xenium", "merfish", "cosmx"], c: "bio" },
+    { k: "ChIP-seq", a: ["chip seq", "chipseq"], c: "bio" },
+    { k: "ATAC-seq", a: ["atac seq", "atacseq", "scatac seq"], c: "bio" },
+    { k: "Whole genome sequencing", a: ["whole genome sequencing", "wgs"], c: "bio" },
+    { k: "Whole exome sequencing", a: ["whole exome sequencing", "exome sequencing"], c: "bio" },
+    { k: "Variant calling", a: ["variant calling", "gatk", "variant analysis", "snv calling"], c: "bio" },
+    { k: "Genomics", a: ["genomics", "genomic"], c: "bio" },
+    { k: "Transcriptomics", a: ["transcriptomics", "transcriptomic"], c: "bio" },
+    { k: "Proteomics", a: ["proteomics", "proteomic"], c: "bio" },
+    { k: "Metabolomics", a: ["metabolomics", "metabolomic"], c: "bio" },
+    { k: "Multi-omics", a: ["multi omics", "multiomics", "multi omic", "omics integration"], c: "bio" },
+    { k: "Metagenomics", a: ["metagenomics", "metagenomic", "microbiome", "16s rrna"], c: "bio" },
+    { k: "Differential expression", a: ["differential expression", "differential gene expression", "deseq2", "edger", "limma"], c: "bio" },
+    { k: "Seurat", a: ["seurat"], c: "bio" },
+    { k: "Scanpy", a: ["scanpy", "anndata"], c: "bio" },
+    { k: "Bioconductor", a: ["bioconductor"], c: "bio" },
+    { k: "Sequence alignment", a: ["sequence alignment", "read alignment", "star aligner", "bwa", "bowtie", "bowtie2", "hisat2", "salmon", "kallisto"], c: "bio" },
+    { k: "Phylogenetics", a: ["phylogenetics", "phylogenetic"], c: "bio" },
+    { k: "Population genetics", a: ["population genetics", "gwas", "genome wide association"], c: "bio" },
+    { k: "Workflow managers", a: ["nextflow", "snakemake", "nf core", "workflow manager", "cromwell", "wdl"], c: "bio" },
+    { k: "Pathway analysis", a: ["pathway analysis", "gene set enrichment", "gsea", "enrichment analysis", "gene ontology"], c: "bio" },
+    { k: "Structural bioinformatics", a: ["structural bioinformatics", "molecular docking", "alphafold", "pymol", "molecular dynamics"], c: "bio" },
+    { k: "Biostatistics", a: ["biostatistics", "biostatistical"], c: "bio" },
+    { k: "Public databases (TCGA, GEO)", a: ["tcga", "geo database", "gene expression omnibus", "ensembl", "ncbi", "uniprot", "gtex", "cellxgene"], c: "bio" },
+    { k: "Machine learning", a: ["machine learning", "ml models", "scikit learn", "sklearn", "random forest", "xgboost"], c: "prog" },
+    { k: "Deep learning", a: ["deep learning", "neural network", "neural networks", "pytorch", "tensorflow", "keras"], c: "prog" },
+    { k: "Statistics", a: ["statistics", "statistical analysis", "statistical methods", "statistical modelling", "statistical modeling"], c: "prog" },
+    { k: "Data analysis", a: ["data analysis", "data analytics", "data analyses"], c: "prog" },
+    { k: "Data visualization", a: ["data visualization", "data visualisation", "ggplot2", "matplotlib", "seaborn", "plotly"], c: "prog" },
+
+    // Programming and computing
+    { k: "Python", a: ["python", "pandas", "numpy", "biopython"], c: "prog" },
+    { k: "R", a: ["r programming", "rstudio", "tidyverse", "r markdown", "rmarkdown", "r shiny", "r packages"], c: "prog", special: "R" },
+    { k: "Bash / shell", a: ["bash", "shell scripting", "shell scripts", "unix shell", "zsh"], c: "prog" },
+    { k: "Linux", a: ["linux", "unix", "ubuntu", "command line"], c: "prog" },
+    { k: "SQL", a: ["sql", "postgresql", "mysql", "sqlite", "relational database"], c: "prog" },
+    { k: "Git / GitHub", a: ["git", "github", "gitlab", "version control"], c: "prog" },
+    { k: "HPC / cluster", a: ["hpc", "high performance computing", "computing cluster", "slurm", "csc puhti", "puhti", "mahti", "lumi"], c: "prog" },
+    { k: "Cloud computing", a: ["cloud computing", "aws", "google cloud", "gcp", "azure"], c: "prog" },
+    { k: "Containers", a: ["docker", "singularity", "apptainer", "containers", "containerization", "conda", "bioconda"], c: "prog" },
+    { k: "MATLAB", a: ["matlab"], c: "prog" },
+    { k: "Java", a: ["java"], c: "prog" },
+    { k: "C / C++", a: ["c++", "cpp"], c: "prog" },
+    { k: "JavaScript", a: ["javascript", "typescript", "node js", "node.js", "nodejs"], c: "prog" },
+    { k: "Excel", a: ["excel", "microsoft excel", "spreadsheets"], c: "prog" },
+    { k: "Microsoft Office", a: ["microsoft office", "ms office", "office 365", "microsoft 365"], c: "prog" },
+    { k: "GraphPad Prism", a: ["graphpad", "prism"], c: "prog" },
+    { k: "ImageJ / Fiji", a: ["imagej", "fiji"], c: "prog" },
+    { k: "SPSS", a: ["spss"], c: "prog" },
+    { k: "Jupyter", a: ["jupyter", "jupyter notebook", "jupyterlab"], c: "prog" },
+
+    // Molecular and cell biology lab
+    { k: "PCR", a: ["pcr", "polymerase chain reaction"], c: "lab" },
+    { k: "qPCR", a: ["qpcr", "rt qpcr", "real time pcr", "quantitative pcr", "rt pcr"], c: "lab" },
+    { k: "Western blot", a: ["western blot", "western blotting", "immunoblot", "immunoblotting"], c: "lab" },
+    { k: "ELISA", a: ["elisa"], c: "lab" },
+    { k: "Cell culture", a: ["cell culture", "tissue culture", "mammalian cell culture", "cell lines", "primary cells"], c: "lab" },
+    { k: "Flow cytometry", a: ["flow cytometry", "facs", "cytometry"], c: "lab" },
+    { k: "Microscopy", a: ["microscopy", "confocal", "fluorescence microscopy", "electron microscopy", "sem", "tem"], c: "lab" },
+    { k: "Immunohistochemistry", a: ["immunohistochemistry", "ihc", "immunofluorescence", "histology"], c: "lab" },
+    { k: "Cloning", a: ["cloning", "molecular cloning", "plasmid", "plasmids", "gibson assembly"], c: "lab" },
+    { k: "CRISPR", a: ["crispr", "cas9", "gene editing", "genome editing"], c: "lab" },
+    { k: "siRNA / knockdown", a: ["sirna", "shrna", "knockdown", "gene silencing"], c: "lab" },
+    { k: "Transfection", a: ["transfection", "transduction", "lentiviral", "lentivirus"], c: "lab" },
+    { k: "Protein purification", a: ["protein purification", "protein expression", "recombinant protein", "fplc", "affinity chromatography"], c: "lab" },
+    { k: "Gel electrophoresis", a: ["gel electrophoresis", "agarose gel", "sds page"], c: "lab" },
+    { k: "DNA/RNA extraction", a: ["dna extraction", "rna extraction", "nucleic acid extraction", "rna isolation", "dna isolation"], c: "lab" },
+    { k: "Library preparation", a: ["library preparation", "library prep", "illumina", "nanopore", "oxford nanopore", "pacbio"], c: "lab" },
+    { k: "Sanger sequencing", a: ["sanger sequencing", "sanger"], c: "lab" },
+    { k: "Microbiology", a: ["microbiology", "microbiological", "bacterial culture", "bacteriology", "aseptic technique"], c: "lab" },
+    { k: "Animal work", a: ["animal experiments", "animal handling", "mouse models", "in vivo", "felasa"], c: "lab" },
+    { k: "Biochemistry", a: ["biochemistry", "biochemical", "biochemist"], c: "lab" },
+    { k: "Molecular biology", a: ["molecular biology", "molecular biologist"], c: "lab" },
+    { k: "Cell biology", a: ["cell biology", "cell biologist"], c: "lab" },
+    { k: "Enzyme assays", a: ["enzyme assay", "enzyme assays", "enzymatic assay", "enzyme kinetics"], c: "lab" },
+    { k: "Nanotechnology", a: ["nanotechnology", "nanobiotechnology", "nanoparticles", "nanoparticle", "nanomaterials"], c: "lab" },
+    { k: "Drug delivery", a: ["drug delivery", "drug release", "formulation development"], c: "lab" },
+    { k: "Extracellular matrix", a: ["extracellular matrix", "ecm"], c: "lab" },
+    { k: "Hypoxia", a: ["hypoxia", "hif 1", "hif1a", "hypoxia inducible"], c: "lab" },
+    { k: "Cancer biology", a: ["cancer biology", "oncology", "tumor biology", "tumour biology", "tumor microenvironment", "tumour microenvironment"], c: "lab" },
+    { k: "Lab notebook / ELN", a: ["eln", "electronic lab notebook", "laboratory notebook"], c: "lab" },
+
+    // Analytical chemistry and quality
+    { k: "HPLC", a: ["hplc", "uplc", "uhplc", "liquid chromatography"], c: "chem" },
+    { k: "LC-MS", a: ["lc ms", "lcms", "lc ms ms", "lc msms"], c: "chem" },
+    { k: "GC / GC-MS", a: ["gc ms", "gcms", "gas chromatography", "gc fid"], c: "chem" },
+    { k: "Mass spectrometry", a: ["mass spectrometry", "mass spec", "icp ms", "maldi"], c: "chem" },
+    { k: "ICP-OES", a: ["icp oes", "icp aes", "icp"], c: "chem" },
+    { k: "Spectroscopy", a: ["spectroscopy", "spectrophotometry", "uv vis", "ftir", "ir spectroscopy", "nmr", "raman"], c: "chem" },
+    { k: "Titration", a: ["titration", "karl fischer"], c: "chem" },
+    { k: "Sample preparation", a: ["sample preparation", "sample prep", "solid phase extraction", "spe"], c: "chem" },
+    { k: "Analytical chemistry", a: ["analytical chemistry", "chemical analysis", "chemical analyses", "analytical methods"], c: "chem" },
+    { k: "Method validation", a: ["method validation", "method development", "validation of methods", "analytical method validation"], c: "chem" },
+    { k: "Quality control", a: ["quality control", "qc"], c: "chem" },
+    { k: "Quality assurance", a: ["quality assurance", "qa"], c: "chem" },
+    { k: "ISO 17025", a: ["iso 17025", "iso iec 17025", "17025", "accredited laboratory", "accreditation"], c: "chem" },
+    { k: "ISO 9001", a: ["iso 9001"], c: "chem" },
+    { k: "GMP", a: ["gmp", "good manufacturing practice", "cgmp"], c: "chem" },
+    { k: "GLP", a: ["glp", "good laboratory practice"], c: "chem" },
+    { k: "LIMS", a: ["lims", "laboratory information management"], c: "chem" },
+    { k: "SOPs", a: ["sop", "sops", "standard operating procedure", "standard operating procedures"], c: "chem" },
+    { k: "Lab safety", a: ["laboratory safety", "lab safety", "chemical safety", "biosafety", "occupational safety", "hse"], c: "chem" },
+    { k: "Environmental analysis", a: ["environmental analysis", "environmental samples", "water analysis", "soil analysis", "environmental testing"], c: "chem" },
+    { k: "Food analysis", a: ["food analysis", "food testing", "food safety", "food microbiology"], c: "chem" },
+    { k: "Regulatory knowledge", a: ["regulatory affairs", "ich guidelines", "fda", "ema"], c: "chem" },
+
+    // Research and academic
+    { k: "Scientific writing", a: ["scientific writing", "manuscript writing", "manuscript preparation", "peer reviewed publications", "publications", "publication record"], c: "res" },
+    { k: "Grant writing", a: ["grant writing", "grant applications", "funding applications", "grant proposals"], c: "res" },
+    { k: "Experimental design", a: ["experimental design", "study design", "design of experiments"], c: "res" },
+    { k: "Literature review", a: ["literature review", "systematic review", "review article"], c: "res" },
+    { k: "Teaching / supervision", a: ["teaching", "supervision", "supervising students", "mentoring", "teaching assistant"], c: "res" },
+    { k: "Conference presentations", a: ["conference presentation", "conference presentations", "poster presentation", "oral presentation", "presented at"], c: "res" },
+    { k: "Project management", a: ["project management", "managing projects", "project coordination"], c: "res" },
+    { k: "Data management", a: ["data management", "fair data", "research data management", "fair principles"], c: "res" },
+    { k: "Reproducible research", a: ["reproducible research", "reproducibility", "reproducible"], c: "res" },
+
+    // Soft skills
+    { k: "Teamwork", a: ["teamwork", "team player", "collaborative", "collaboration", "work in a team", "working in a team", "team work"], c: "soft", soft: true },
+    { k: "Communication", a: ["communication skills", "communication", "communicate", "interpersonal skills"], c: "soft", soft: true },
+    { k: "Independent work", a: ["independently", "independent work", "self motivated", "self driven", "autonomous", "proactive"], c: "soft", soft: true },
+    { k: "Problem solving", a: ["problem solving", "problem solver", "analytical thinking", "analytical skills", "troubleshooting"], c: "soft", soft: true },
+    { k: "Attention to detail", a: ["attention to detail", "detail oriented", "accuracy", "accurate", "meticulous", "precise"], c: "soft", soft: true },
+    { k: "Time management", a: ["time management", "organizational skills", "organisational skills", "organized", "organised", "prioritize", "prioritise"], c: "soft", soft: true },
+    { k: "Customer focus", a: ["customer service", "customer oriented", "customer focus", "client"], c: "soft", soft: true },
+    { k: "Leadership", a: ["leadership", "led a team", "team lead"], c: "soft", soft: true },
+    { k: "Adaptability", a: ["adaptability", "flexible", "flexibility", "fast learner", "eager to learn", "willingness to learn"], c: "soft", soft: true },
+    { k: "International environment", a: ["international environment", "multicultural", "international team", "intercultural"], c: "soft", soft: true },
+  ];
+
+  const LANGS = [
+    { k: "English", a: ["english", "englanti", "englannin"] },
+    { k: "Finnish", a: ["finnish", "suomi", "suomen kieli", "suomen kielen", "suomea"] },
+    { k: "Swedish", a: ["swedish", "ruotsi", "ruotsin"] },
+    { k: "German", a: ["german", "saksa"] },
+    { k: "French", a: ["french", "ranska"] },
+    { k: "Spanish", a: ["spanish"] },
+    { k: "Persian", a: ["persian", "farsi"] },
+    { k: "Arabic", a: ["arabic"] },
+    { k: "Russian", a: ["russian", "venäjä"] },
+    { k: "Chinese", a: ["chinese", "mandarin"] },
+  ];
+
+  const STOP = new Set(("a about above after again against all also am an and any are as at be because been before being below between both but by can could did do does doing down during each few for from further had has have having he her here hers herself him himself his how i if in into is it its itself just me more most my myself no nor not now of off on once only or other our ours ourselves out over own same she should so some such than that the their theirs them themselves then there these they this those through to too under until up very was we were what when where which while who whom why will with would you your yours yourself yourselves etc e g ie i e via per within across around based including include includes well new one two three may must shall need needs needed strong good excellent great high highly relevant related required requirement requirements preferred plus advantage ability able experience experienced work working worked job role position candidate candidates applicant applicants apply application applications company team teams our we you university faculty department unit group research researcher researchers project projects year years month months day days time full part contract permanent temporary start date salary offer offers benefit benefits opportunity opportunities please send submit deadline contact information further details more like look looking seek seeking hire hiring join responsibilities responsibility tasks task duties include main key area areas field fields degree knowledge skills skill understanding familiarity background other different various wide range level levels person people help support develop development provide ensure use using used make making take part daily also based within new oulu finland finnish helsinki espoo tampere turku").split(/\s+/));
+
+  const ACRO_STOP = new Set(["EU", "CV", "PDF", "FI", "HR", "CEO", "CTO", "OY", "AB", "LTD", "INC", "PHD", "MSC", "BSC", "MS", "BA", "MA", "PH", "D", "I", "II", "III", "IV", "US", "USA", "UK", "AI", "IT", "TBD", "FAQ", "URL", "WWW", "HTTP", "HTTPS", "COM", "GMBH", "EUR", "ID", "OK", "NB", "PS", "VAT", "CET", "EET", "AM", "PM", "UTC", "DOI", "ORCID", "LINKEDIN", "THE", "AND", "FOR", "YOU", "WE", "OUR", "CEST", "EEST", "Q"]);
+
+  // ---------- Text helpers ----------
+  function norm(s) {
+    return (" " + String(s || "") + " ")
+      .replace(/[‐-―−]/g, "-")
+      .replace(/[‘’]/g, "'")
+      .toLowerCase()
+      .replace(/ph\.d\.?/g, "phd")
+      .replace(/m\.sc\.?/g, "msc")
+      .replace(/b\.sc\.?/g, "bsc")
+      .replace(/[-_\/\\|:;,()\[\]{}"'!?*•·●▪■◆►✓→]/g, " ")
+      .replace(/\.(?=\s)/g, " ")
+      .replace(/\s+/g, " ");
+  }
+  function escRe(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
+  const reCache = new Map();
+  function termRe(alias) {
+    let r = reCache.get(alias);
+    if (!r) {
+      const a = norm(alias).trim();
+      r = new RegExp("(?<![a-z0-9+#])" + escRe(a) + "(?:s|es)?(?![a-z0-9+#])", "g");
+      reCache.set(alias, r);
+    }
+    r.lastIndex = 0;
+    return r;
+  }
+  function countAlias(normText, alias) {
+    const r = termRe(alias);
+    const m = normText.match(r);
+    return m ? m.length : 0;
+  }
+  // Special: programming language R (single uppercase letter, needs context).
+  function hasR(raw) {
+    const t = String(raw || "");
+    const pats = [
+      /(?:Python|python|SQL|Bash|bash|MATLAB|Matlab|Perl|Julia|Java|C\+\+|SAS|Stata)\s*(?:,|\/|and|&|or)\s*R(?![A-Za-z0-9&])/,
+      /(?<![A-Za-z0-9.&])R\s*(?:,|\/|and|or|&)\s*(?:Python|python|SQL|Bash|bash|MATLAB|Matlab|Perl|Bioconductor|RStudio)/,
+      /(?<![A-Za-z0-9.&])R\s+(?:programming|language|scripting|scripts?|packages?|statistical|Shiny|environment|code)/i,
+      /(?:languages?|programming|software|tools)\s*:\s*[^\n]*?(?<![A-Za-z0-9.&])R(?![A-Za-z0-9&'’.])/i,
+      /\bin R\b(?!&)/,
+    ];
+    return pats.some((p) => p.test(t));
+  }
+  function countR(raw) {
+    const t = String(raw || "");
+    return hasR(t) ? 1 : 0;
+  }
+
+  function skillCount(skill, raw, nt) {
+    let n = 0;
+    for (const a of skill.a) n += countAlias(nt, a);
+    if (skill.special === "R") n += countR(raw);
+    return n;
+  }
+  function skillEvidence(skill, raw, nt) {
+    for (const a of skill.a) if (countAlias(nt, a)) return a;
+    if (skill.special === "R" && hasR(raw)) return "R";
+    return null;
+  }
+
+  // ---------- Job description parsing ----------
+  const REQ_HEAD = /(requirement|qualification|we expect|you have|you bring|must have|what we.?re looking for|what you need|your profile|profile|eligibility|who you are|we hope|we are looking|essential|edellytämme|vaatimukset|odotamme)/i;
+  const PREF_HEAD = /(nice to have|advantage|advantageous|preferred|bonus|beneficial|desirable|desired|an asset|considered a plus|is a plus|are a plus|would be a plus|merit|meritorious|eduksi|katsotaan eduksi)/i;
+  const OFFER_HEAD = /(we offer|what we offer|benefits|about us|about the company|who we are|our offer|tarjoamme|how to apply|application process|contact|further information|lisätietoja)/i;
+  const REQ_LINE = /(required|requirement|must|essential|mandatory|necessary|minimum|at least|proven|solid|strong|demonstrated|edellytä|vaaditaan)/i;
+  const TASK_HEAD = /(responsibilit|your tasks|your role|duties|you will|key tasks|job description|the role|main tasks|tehtäv)/i;
+
+  function splitLines(text) {
+    return String(text || "")
+      .replace(/\r/g, "")
+      .split(/\n|(?<=[.!?])\s+(?=[A-Z•\-•])/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+  }
+  function isHeadingLine(line) {
+    const l = line.trim();
+    if (l.length > 70) return false;
+    if (/[:：]\s*$/.test(l)) return true;
+    if (!/[.!?]$/.test(l) && l.split(/\s+/).length <= 7) return true;
+    return false;
+  }
+
+  function classifyJD(jd) {
+    // returns array of {line, level} where level in req|pref|task|offer|neutral
+    const out = [];
+    let ctx = "neutral";
+    for (const line of splitLines(jd)) {
+      let level = ctx;
+      if (isHeadingLine(line)) {
+        if (PREF_HEAD.test(line)) ctx = "pref";
+        else if (OFFER_HEAD.test(line)) ctx = "offer";
+        else if (REQ_HEAD.test(line)) ctx = "req";
+        else if (TASK_HEAD.test(line)) ctx = "task";
+        level = ctx;
+      }
+      if (PREF_HEAD.test(line)) level = "pref";
+      else if (REQ_LINE.test(line) && level !== "offer") level = "req";
+      out.push({ line, level });
+    }
+    return out;
+  }
+
+  const LEVEL_W = { req: 3, task: 2, neutral: 2, pref: 1, offer: 0.5 };
+  const LEVEL_RANK = { offer: 0, pref: 1, neutral: 2, task: 2, req: 3 };
+
+  function extractJDKeywords(jd) {
+    const lines = classifyJD(jd);
+    const terms = new Map(); // key -> {name, skill, count, level, soft, extra}
+    const add = (key, name, level, cnt, info) => {
+      let t = terms.get(key);
+      if (!t) { t = Object.assign({ key, name, count: 0, level }, info); terms.set(key, t); }
+      t.count += cnt;
+      if (LEVEL_RANK[level] > LEVEL_RANK[t.level]) t.level = level;
+    };
+    for (const { line, level } of lines) {
+      if (line.length < 140 && /\b(faculty|department|school|institute|unit|centre|center|laboratory) of\b/i.test(line) && !/experience|knowledge|skills|degree/i.test(line)) continue;
+      const nt = norm(line);
+      for (const s of SKILLS) {
+        const c = skillCount(s, line, nt);
+        if (c) add("s:" + s.k, s.k, level, c, { skill: s, soft: !!s.soft, cat: s.c });
+      }
+    }
+    // Extra terms: acronyms and repeated bigrams not covered by dictionary
+    const covered = new Set();
+    const aliasTokens = new Set();
+    for (const s of SKILLS) for (const a of s.a) { const na = norm(a).trim(); covered.add(na); na.split(" ").forEach((w) => aliasTokens.add(w)); }
+    const titleNorm = norm(guessTitle(jd)).trim();
+    const rawAll = String(jd || "");
+    const levelOfText = (needleRe) => {
+      let best = null;
+      for (const { line, level } of lines) {
+        needleRe.lastIndex = 0;
+        if (needleRe.test(line)) { if (!best || LEVEL_RANK[level] > LEVEL_RANK[best]) best = level; }
+      }
+      return best || "neutral";
+    };
+    const acro = new Map();
+    (rawAll.match(/(?<![A-Za-z0-9])[A-Z][A-Z0-9]{1,6}(?![A-Za-z0-9])/g) || []).forEach((a) => {
+      if (ACRO_STOP.has(a) || /^\d+$/.test(a)) return;
+      if (covered.has(a.toLowerCase()) || aliasTokens.has(a.toLowerCase())) return;
+      acro.set(a, (acro.get(a) || 0) + 1);
+    });
+    for (const [a, c] of acro) {
+      const lvl = levelOfText(new RegExp("(?<![A-Za-z0-9])" + escRe(a) + "(?![A-Za-z0-9])"));
+      add("x:" + a.toLowerCase(), a, lvl, c, { extra: true, alias: a.toLowerCase(), soft: false });
+    }
+    // bigrams
+    const words = norm(rawAll).trim().split(" ");
+    const bg = new Map();
+    for (let i = 0; i < words.length - 1; i++) {
+      const w1 = words[i], w2 = words[i + 1];
+      if (STOP.has(w1) || STOP.has(w2) || w1.length < 3 || w2.length < 3 || /\d/.test(w1 + w2)) continue;
+      const k = w1 + " " + w2;
+      bg.set(k, (bg.get(k) || 0) + 1);
+    }
+    const already = (phrase) => {
+      for (const t of terms.values()) {
+        if (t.skill) { for (const a of t.skill.a) { const na = norm(a).trim(); if (na.includes(phrase) || phrase.includes(na)) return true; } }
+      }
+      return covered.has(phrase);
+    };
+    const bgs = [...bg.entries()].filter(([k, c]) => c >= 2 && !already(k) && !(titleNorm && titleNorm.includes(k))).sort((a, b) => b[1] - a[1]).slice(0, 10);
+    for (const [k, c] of bgs) {
+      const lvl = levelOfText(new RegExp(k.split(" ").map(escRe).join("[\\s\\-/]+"), "i"));
+      add("x:" + k, k, lvl, c, { extra: true, alias: k, soft: false });
+    }
+    // weights
+    for (const t of terms.values()) {
+      let w = LEVEL_W[t.level] * (1 + 0.25 * Math.min(t.count - 1, 3));
+      if (t.soft) w *= 0.5;
+      if (t.extra) w *= 0.6;
+      t.weight = Math.round(w * 100) / 100;
+    }
+    return { terms: [...terms.values()], lines };
+  }
+
+  // ---------- CV sections ----------
+  const SECTION_DEFS = {
+    summary: ["summary", "profile", "professional summary", "about me", "objective", "career objective", "personal profile", "personal statement"],
+    experience: ["experience", "work experience", "professional experience", "employment", "employment history", "work history", "research experience", "career history", "positions", "professional background", "relevant experience", "laboratory experience", "industry experience", "academic experience", "internships", "internship"],
+    education: ["education", "academic background", "educational background", "education and training", "academic qualifications", "degrees", "qualifications"],
+    skills: ["skills", "technical skills", "core competencies", "competencies", "key skills", "expertise", "skills and tools", "tools", "technologies", "laboratory skills", "computational skills", "skill set", "areas of expertise", "methods", "techniques"],
+    publications: ["publications", "selected publications", "peer reviewed publications", "papers", "articles"],
+    projects: ["projects", "selected projects", "research projects", "personal projects"],
+    certifications: ["certifications", "certificates", "courses", "training", "licenses"],
+    languages: ["languages", "language skills"],
+    awards: ["awards", "honors", "honours", "grants", "awards and honors", "scholarships", "funding"],
+    references: ["references", "referees"],
+  };
+  function detectSections(cv) {
+    const lines = String(cv || "").replace(/\r/g, "").split("\n");
+    const found = {}; // name -> {start, end}
+    const order = [];
+    lines.forEach((line, i) => {
+      const l = norm(line).trim().replace(/\s*&\s*/g, " and ");
+      if (!l || l.length > 45) return;
+      for (const [name, heads] of Object.entries(SECTION_DEFS)) {
+        if (found[name]) continue;
+        if (heads.some((h) => l === h || (l.startsWith(h + " ") && l.split(" ").length <= 5) || (l.endsWith(" " + h) && l.split(" ").length <= 4))) {
+          found[name] = { start: i };
+          order.push(name);
+          break;
+        }
+      }
+    });
+    const sorted = order.map((n) => [n, found[n].start]).sort((a, b) => a[1] - b[1]);
+    sorted.forEach(([n, s], idx) => {
+      found[n].end = idx + 1 < sorted.length ? sorted[idx + 1][1] : lines.length;
+      found[n].text = lines.slice(s + 1, found[n].end).join("\n");
+    });
+    return found;
+  }
+
+  // ---------- Dates / experience ----------
+  const MONTHS = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, sept: 9, oct: 10, nov: 11, dec: 12 };
+  function parseDatePart(s, isEnd, now) {
+    s = s.trim().toLowerCase();
+    if (/^(present|current|now|ongoing|today|to date|nykyään)$/.test(s)) return now;
+    let m = s.match(/^([a-z]{3,9})\.?\s+(\d{4})$/);
+    if (m && MONTHS[m[1].slice(0, 4) === "sept" ? "sept" : m[1].slice(0, 3)]) return Number(m[2]) * 12 + (MONTHS[m[1].slice(0, 3)] - 1);
+    m = s.match(/^(\d{1,2})[\/.](\d{4})$/);
+    if (m && +m[1] >= 1 && +m[1] <= 12) return Number(m[2]) * 12 + (+m[1] - 1);
+    m = s.match(/^(\d{4})[\/.\-](\d{1,2})$/);
+    if (m && +m[2] >= 1 && +m[2] <= 12) return Number(m[1]) * 12 + (+m[2] - 1);
+    m = s.match(/^(\d{4})$/);
+    if (m) return Number(m[1]) * 12 + (isEnd ? 11 : 0);
+    return null;
+  }
+  const DP = "(?:(?:[A-Za-z]{3,9}\\.?\\s+\\d{4})|(?:\\d{1,2}[\\/.]\\d{4})|(?:\\d{4}[\\/.]\\d{1,2})|(?:\\d{4}))";
+  const RANGE_RE = new RegExp("(" + DP + ")\\s*(?:-|–|—|to|until|till)\\s*(" + DP + "|[Pp]resent|[Cc]urrent|[Nn]ow|[Oo]ngoing|[Tt]oday)", "g");
+  function experienceMonths(text, nowDate) {
+    const now = (nowDate || new Date());
+    const nowM = now.getFullYear() * 12 + now.getMonth();
+    const t = String(text || "").replace(/[‐-―−]/g, "-");
+    const ivs = [];
+    let m;
+    RANGE_RE.lastIndex = 0;
+    while ((m = RANGE_RE.exec(t))) {
+      const a = parseDatePart(m[1], false, nowM), b = parseDatePart(m[2], true, nowM);
+      if (a == null || b == null) continue;
+      if (a / 12 < 1960 || b > nowM + 1 || b < a) continue;
+      ivs.push([a, Math.min(b, nowM)]);
+    }
+    ivs.sort((x, y) => x[0] - y[0]);
+    let total = 0, cur = null;
+    for (const iv of ivs) {
+      if (!cur) cur = iv.slice();
+      else if (iv[0] <= cur[1] + 1) cur[1] = Math.max(cur[1], iv[1]);
+      else { total += cur[1] - cur[0] + 1; cur = iv.slice(); }
+    }
+    if (cur) total += cur[1] - cur[0] + 1;
+    return { months: total, ranges: ivs.length };
+  }
+  function jdYears(jd) {
+    const t = String(jd || "").replace(/[‐-―−]/g, "-");
+    const re = /(?:(?:at least|minimum(?: of)?|min\.?|over|more than)\s+)?(\d{1,2}|one|two|three|four|five|six|seven|eight|ten)\s*(?:\+|or more)?\s*(?:(?:-|to)\s*(\d{1,2})\s*)?\+?\s*years?(?:'|’)?\s*(?:of\s+)?([^.\n]{0,60})/gi;
+    const words = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, ten: 10 };
+    let m, best = null;
+    while ((m = re.exec(t))) {
+      const ctx = (m[3] || "") + " " + t.slice(Math.max(0, m.index - 40), m.index);
+      if (!/experience|work|industry|laboratory|lab|professional|postdoc|kokemus/i.test(ctx)) continue;
+      if (/contract|position is|duration|fixed.term|appointment|funded for|period/i.test(ctx)) continue;
+      const n = isNaN(+m[1]) ? words[m[1].toLowerCase()] : +m[1];
+      if (n && n <= 20 && (best == null || n < best.years)) best = { years: n, text: m[0].trim() };
+    }
+    return best;
+  }
+
+  // ---------- Education ----------
+  const EDU = [
+    { lvl: 3, name: "PhD", re: /(?<![a-z])(phd|doctoral degree|doctorate|doctor of philosophy|d\.?phil|dr\.?\s?rer|tohtorin tutkinto)(?![a-z])/i },
+    { lvl: 2, name: "Master's", re: /(?<![a-z])(master'?s?|msc|m\.sc|m\.s\.|mba|meng|maisterin|diplomi.?insinööri|dipl\.?\s?ing)(?![a-z])/i },
+    { lvl: 1, name: "Bachelor's", re: /(?<![a-z])(bachelor'?s?|bsc|b\.sc|b\.s\.|beng|kandidaatin|amk|university of applied sciences degree)(?![a-z])/i },
+  ];
+  function eduLevels(text) {
+    const t = String(text || "").replace(/ph\.d\.?/gi, "phd");
+    return EDU.filter((e) => e.re.test(t));
+  }
+  function jdEducation(jd) {
+    const lv = eduLevels(jd);
+    if (!lv.length) return null;
+    // Requirement = lowest level mentioned (e.g. "MSc or PhD")
+    const min = lv.reduce((a, b) => (a.lvl < b.lvl ? a : b));
+    // field words after "degree in"
+    const m = String(jd).match(/(?:degree|msc|master'?s?|phd|bachelor'?s?|background)\s+(?:degree\s+)?in\s+([^.\n;]{3,120})/i);
+    let fields = [];
+    if (m) fields = norm(m[1]).trim().split(" ").filter((w) => w.length > 3 && !STOP.has(w) && !["related", "similar", "equivalent", "suitable", "field", "fields", "discipline", "sciences", "science", "relevant", "appropriate"].includes(w)).slice(0, 8);
+    return { level: min.lvl, name: min.name, fields, phrase: m ? m[0].trim() : "" };
+  }
+
+  // ---------- Contact and format ----------
+  function contactInfo(cv) {
+    const t = String(cv || "");
+    return {
+      email: /[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}/.test(t),
+      phone: /(?:\+\d{1,3}[\s\-]?)?(?:\(?\d{2,4}\)?[\s\-]?){2,4}\d{2,4}/.test(t.replace(/\b(19|20)\d{2}\s*[-–]\s*(19|20)\d{2}\b/g, "")) && /(\+\d{6,}|\+\d{1,3}[\s\-]?\d|phone|tel|mobile|puh)/i.test(t),
+      linkedin: /linkedin\.com\//i.test(t),
+      github: /github\.com\//i.test(t),
+    };
+  }
+
+  // ---------- Main scoring ----------
+  function score(cvText, jdText, opts) {
+    opts = opts || {};
+    const cv = String(cvText || "");
+    const jd = String(jdText || "");
+    const ncv = norm(cv);
+    const sections = detectSections(cv);
+    const words = cv.split(/\s+/).filter(Boolean).length;
+    const result = { components: {}, warnings: [], knockouts: [], tips: [] };
+
+    // 1. Keywords
+    const { terms } = extractJDKeywords(jd);
+    let wTot = 0, wHit = 0;
+    const kw = terms.map((t) => {
+      let cvCount = 0, ev = null;
+      if (t.skill) { cvCount = skillCount(t.skill, cv, ncv); ev = skillEvidence(t.skill, cv, ncv); }
+      else { cvCount = countAlias(ncv, t.alias); ev = cvCount ? t.alias : null; }
+      const inSkills = sections.skills ? (t.skill ? skillCount(t.skill, sections.skills.text, norm(sections.skills.text)) > 0 : countAlias(norm(sections.skills.text), t.alias) > 0) : false;
+      const hit = cvCount > 0;
+      wTot += t.weight; if (hit) wHit += t.weight;
+      return Object.assign({}, t, { cvCount, hit, evidence: ev, inSkills });
+    }).sort((a, b) => b.weight - a.weight || b.count - a.count);
+    const hard = kw.filter((k) => !k.soft), soft = kw.filter((k) => k.soft);
+    result.keywords = kw;
+    result.components.keywords = {
+      label: "تطابق کلمات کلیدی",
+      weight: 50,
+      score: wTot ? Math.round((wHit / wTot) * 100) : null,
+      detail: kw.length ? `${kw.filter((k) => k.hit).length} از ${kw.length} کلمه کلیدی آگهی در رزومه پیدا شد (سخت: ${hard.filter((k) => k.hit).length}/${hard.length}، نرم: ${soft.filter((k) => k.hit).length}/${soft.length})` : "کلمه کلیدی قابل تشخیصی در آگهی پیدا نشد",
+    };
+    const reqMissing = kw.filter((k) => !k.hit && k.level === "req" && !k.soft);
+    if (reqMissing.length) result.tips.push("مهارت‌های «الزامی» که در رزومه نیست: " + reqMissing.slice(0, 8).map((k) => k.name).join("، ") + ". اگر واقعاً این تجربه را دارید، با همان عبارتی که آگهی استفاده کرده در رزومه بیاورید.");
+    const hitNotInSkills = kw.filter((k) => k.hit && !k.soft && !k.inSkills && sections.skills).slice(0, 6);
+    if (hitNotInSkills.length) result.tips.push("این مهارت‌ها در رزومه هست ولی در بخش Skills نیامده: " + hitNotInSkills.map((k) => k.name).join("، ") + ". بعضی ATSها بخش Skills را جدا می‌خوانند.");
+
+    // 2. Job title
+    const title = (opts.title || "").trim() || guessTitle(jd);
+    if (title) {
+      const nt = norm(title).trim();
+      const sig = nt.split(" ").filter((w) => w.length > 2 && !STOP.has(w) && !["senior", "junior", "lead", "trainee", "intern", "assistant", "associate", "and", "for", "the"].includes(w));
+      let s;
+      if (countAlias(ncv, nt)) s = 100;
+      else if (sig.length) { const h = sig.filter((w) => countAlias(ncv, w)).length; s = Math.round((h / sig.length) * 70); }
+      else s = null;
+      result.components.title = { label: "عنوان شغلی", weight: 10, score: s, detail: `عنوان: «${title}»` + (s === 100 ? " دقیقاً در رزومه آمده" : s != null ? `؛ ${sig.filter((w) => countAlias(ncv, w)).length} از ${sig.length} واژه اصلی عنوان در رزومه هست` : "") };
+      if (s != null && s < 100) result.tips.push(`عنوان «${title}» عیناً در رزومه نیست. اگر با واقعیت جور است، آن را در خلاصه بالای رزومه بیاورید (مثلاً «… with experience as/aiming for ${title}»).`);
+    } else result.components.title = { label: "عنوان شغلی", weight: 10, score: null, detail: "عنوان شغلی مشخص نشد؛ آن را در کادر عنوان وارد کنید" };
+
+    // 3. Education
+    const je = jdEducation(jd);
+    if (je) {
+      const eduText = sections.education ? sections.education.text : cv;
+      const cl = eduLevels(eduText);
+      const cvMax = cl.length ? Math.max(...cl.map((e) => e.lvl)) : 0;
+      let s = cvMax >= je.level ? 100 : cvMax === je.level - 1 ? 50 : 0;
+      let fieldNote = "";
+      if (je.fields.length) {
+        const fh = je.fields.filter((w) => countAlias(ncv, w));
+        fieldNote = `؛ رشته: ${fh.length} از ${je.fields.length} واژه («${je.fields.join(", ")}») در رزومه هست`;
+        s = Math.round(s * 0.8 + (fh.length ? 20 : 0));
+      }
+      result.components.education = { label: "مدرک تحصیلی", weight: 10, score: s, detail: `آگهی حداقل ${je.name} می‌خواهد؛ بالاترین مدرک تشخیص‌داده‌شده در رزومه: ${cvMax ? EDU.find((e) => e.lvl === cvMax).name : "پیدا نشد"}${fieldNote}` };
+      if (cvMax < je.level) result.knockouts.push(`مدرک: آگهی ${je.name} می‌خواهد و در رزومه پیدا نشد. اگر دارید، عنوان مدرک را واضح بنویسید (مثلاً «MSc in …»).`);
+    } else result.components.education = { label: "مدرک تحصیلی", weight: 10, score: null, detail: "آگهی شرط مدرک مشخصی ندارد" };
+
+    // 4. Experience years
+    const jy = jdYears(jd);
+    if (jy) {
+      const src = sections.experience ? sections.experience.text : null;
+      if (src) {
+        const em = experienceMonths(src, opts.now);
+        if (em.ranges) {
+          const yrs = em.months / 12;
+          const s = Math.min(100, Math.round((yrs / jy.years) * 100));
+          result.components.experience = { label: "سابقه کار", weight: 10, score: s, detail: `آگهی: «${jy.text}». سابقه محاسبه‌شده از بخش Experience: حدود ${yrs.toFixed(1)} سال (${em.ranges} بازه تاریخ)` };
+          if (yrs < jy.years) result.knockouts.push(`سابقه: آگهی حدود ${jy.years} سال می‌خواهد و از تاریخ‌های رزومه حدود ${yrs.toFixed(1)} سال محاسبه شد.`);
+        } else {
+          result.components.experience = { label: "سابقه کار", weight: 10, score: null, detail: `آگهی ${jy.years} سال سابقه می‌خواهد ولی در بخش Experience بازه تاریخی قابل خواندن پیدا نشد` };
+          result.warnings.push("تاریخ‌های بخش Experience خوانده نشد. از قالب «Jan 2022 – Present» یا «2021 – 2023» استفاده کنید.");
+        }
+      } else {
+        result.components.experience = { label: "سابقه کار", weight: 10, score: null, detail: `آگهی ${jy.years} سال سابقه می‌خواهد ولی بخش Experience در رزومه تشخیص داده نشد` };
+      }
+    } else result.components.experience = { label: "سابقه کار", weight: 10, score: null, detail: "آگهی تعداد سال سابقه مشخصی نخواسته" };
+
+    // 5. Languages
+    const njd = norm(jd);
+    const jl = LANGS.filter((l) => l.a.some((a) => countAlias(njd, a)));
+    if (jl.length) {
+      const hits = jl.filter((l) => l.a.some((a) => countAlias(ncv, a)));
+      const s = Math.round((hits.length / jl.length) * 100);
+      result.components.languages = { label: "زبان", weight: 10, score: s, detail: `زبان‌های آگهی: ${jl.map((l) => l.k).join("، ")}؛ در رزومه: ${hits.map((l) => l.k).join("، ") || "هیچ‌کدام"}` };
+      jl.filter((l) => !hits.includes(l)).forEach((l) => {
+        const lineHit = classifyJD(jd).find((x) => l.a.some((a) => countAlias(norm(x.line), a)));
+        const lvl = lineHit ? lineHit.level : "neutral";
+        if (lvl === "pref") result.tips.push(`زبان ${l.k} در آگهی «امتیاز» حساب شده و در رزومه نیست.`);
+        else result.knockouts.push(`زبان ${l.k} در آگهی آمده و در رزومه نیست. اگر در حد کمی بلدید، با سطحش بنویسید (مثلاً «${l.k}: A2» یا «${l.k}: B1»).`);
+      });
+      if (!sections.languages) result.tips.push("بخش جداگانه Languages با سطح هر زبان (مثلاً CEFR) خواندن را برای ATS و رکروتر راحت‌تر می‌کند.");
+    } else result.components.languages = { label: "زبان", weight: 10, score: null, detail: "آگهی شرط زبانی ندارد" };
+
+    // 6. Format and parseability
+    let f = 100;
+    const fNotes = [];
+    const ci = contactInfo(cv);
+    if (!sections.experience) { f -= 20; fNotes.push("سرفصل Experience پیدا نشد"); }
+    if (!sections.education) { f -= 15; fNotes.push("سرفصل Education پیدا نشد"); }
+    if (!sections.skills) { f -= 15; fNotes.push("سرفصل Skills پیدا نشد"); }
+    if (!ci.email) { f -= 15; fNotes.push("ایمیل پیدا نشد"); }
+    if (!ci.phone) { f -= 5; fNotes.push("شماره تلفن پیدا نشد"); }
+    if (words < 200) { f -= 15; fNotes.push(`متن رزومه خیلی کوتاه است (${words} کلمه)`); }
+    const pf = opts.parse || {};
+    if (pf.emptyText) { f = 0; fNotes.unshift("از فایل تقریباً متنی استخراج نشد؛ احتمالاً PDF تصویری/اسکن است و ATS آن را نمی‌خواند"); }
+    if (pf.iconGlyphs) { f -= 5; fNotes.push(`${pf.iconGlyphs} نماد آیکونی/ناشناخته در متن استخراج‌شده`); }
+    if (pf.multiColumn) { f -= 10; fNotes.push("احتمال چیدمان چندستونی (ترتیب متن ممکن است در ATS به هم بریزد)"); }
+    if (pf.tables) { f -= 10; fNotes.push(`${pf.tables} جدول در فایل Word`); }
+    if (pf.textBoxesSuspect) { f -= 5; fNotes.push("احتمال تکست‌باکس یا سربرگ"); }
+    f = Math.max(0, f);
+    result.components.format = { label: "ساختار و خوانایی برای ATS", weight: 10, score: f, detail: fNotes.length ? fNotes.join("؛ ") : "سرفصل‌های استاندارد، ایمیل و تلفن پیدا شد" };
+    fNotes.forEach((n) => result.warnings.push(n));
+    result.sections = Object.keys(sections);
+    result.contact = ci;
+    result.words = words;
+
+    // Overall
+    let num = 0, den = 0;
+    for (const c of Object.values(result.components)) if (c.score != null) { num += c.score * c.weight; den += c.weight; }
+    result.overall = den ? Math.round(num / den) : 0;
+    if (pf.emptyText) result.overall = Math.min(result.overall, 10);
+
+    // JD hints
+    if (/work permit|right to work|residence permit|eligible to work|työlupa|oleskelulupa/i.test(jd)) result.knockouts.push("آگهی به مجوز کار/اقامت اشاره کرده؛ معمولاً یک سؤال حذفی در فرم اپلای است. وضعیتتان را در فرم و در صورت نیاز در رزومه شفاف بنویسید.");
+    if (/driv(?:er'?s|ing) licen[cs]e|ajokortti/i.test(jd)) result.knockouts.push("آگهی گواهینامه رانندگی خواسته؛ اگر دارید در رزومه ذکر کنید.");
+    return result;
+  }
+
+  function guessTitle(jd) {
+    const lines = String(jd || "").split("\n").map((s) => s.trim()).filter(Boolean);
+    for (const l of lines.slice(0, 4)) {
+      if (l.length >= 4 && l.length <= 80 && !/[.!?]$/.test(l) && /[A-Za-z]/.test(l) && !/^(about|we |our |job description|apply)/i.test(l)) {
+        return l.replace(/\s*[\(\[].*?[\)\]]\s*/g, " ").replace(/\s*\|\s*.*$/, "").replace(/\s+[–—-]\s+.*$/, "").trim();
+      }
+    }
+    return "";
+  }
+
+  root.ATS = { score, extractJDKeywords, detectSections, experienceMonths, jdYears, jdEducation, norm, SKILLS, guessTitle, hasR };
+})(typeof window !== "undefined" ? window : globalThis);

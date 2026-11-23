@@ -1,0 +1,14 @@
+{
+  "name": "ats-scorer",
+  "version": "1.0.0",
+  "private": true,
+  "description": "CV vs job ad match scorer (ATS simulation) on Cloudflare Workers",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "test": "node --test"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}

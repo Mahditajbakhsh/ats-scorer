@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>سنجش رزومه با آگهی (شبیه‌ساز ATS)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mammoth@1.6.0/mammoth.browser.min.js"></script>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="wrap">
+  <h1>سنجش تطابق رزومه با آگهی</h1>
+  <p class="sub">رزومه و متن آگهی را بدهید تا نمره‌ای شبیه به آنچه ATSها می‌سنجند بگیرید: کلمات کلیدی، عنوان شغلی، مدرک، سابقه، زبان و خوانایی فایل. این یک شبیه‌سازی است؛ الگوریتم واقعی Workday، Taleo یا بقیه منتشر نشده و هیچ ابزاری نمی‌تواند نمره دقیق آن‌ها را پیش‌بینی کند. نمره کلمه‌محور کاملاً در مرورگر خودتان محاسبه می‌شود؛ فقط تحلیل معنایی متن را به سرور می‌فرستد.</p>
+
+  <div class="grid">
+    <div class="card">
+      <h2><span class="step">۱</span> رزومه</h2>
+      <div class="drop" id="cvDrop">
+        <span>فایل PDF، DOCX یا TXT را اینجا بکشید یا انتخاب کنید</span>
+        <label class="btn ghost">انتخاب فایل<input type="file" id="cvFile" accept=".pdf,.docx,.txt,.md" hidden></label>
+      </div>
+      <textarea id="cv" placeholder="Or paste your CV text here..."></textarea>
+      <div class="fileinfo" id="cvInfo"></div>
+    </div>
+    <div class="card">
+      <h2><span class="step">۲</span> آگهی</h2>
+      <div class="drop" id="jdDrop">
+        <span>متن کامل آگهی را بچسبانید (یا فایل آن را بدهید)</span>
+        <label class="btn ghost">انتخاب فایل<input type="file" id="jdFile" accept=".pdf,.docx,.txt,.md" hidden></label>
+      </div>
+      <textarea id="jd" placeholder="Paste the full job ad here, including requirements and 'nice to have' sections..."></textarea>
+      <label class="small">عنوان شغلی (اختیاری؛ اگر خالی بماند از خط اول آگهی حدس زده می‌شود)</label>
+      <input type="text" id="title" placeholder="e.g. Laboratory Engineer">
+    </div>
+  </div>
+
+  <div class="actions">
+    <button class="btn" id="run">محاسبه نمره</button>
+    <span class="err" id="runErr"></span>
+  </div>
+
+  <div id="results">
+    <div class="top">
+      <div class="card">
+        <div class="ring"><svg width="170" height="170" viewBox="0 0 170 170"><circle cx="85" cy="85" r="72" fill="none" stroke="var(--line)" stroke-width="14"/><circle id="arc" cx="85" cy="85" r="72" fill="none" stroke-width="14" stroke-linecap="round" stroke-dasharray="452.4" stroke-dashoffset="452.4"/></svg>
+          <div class="num"><div><b id="overall">0</b><span>از ۱۰۰</span></div></div></div>
+        <div class="band" id="band"></div>
+        <p class="note" style="text-align:center;margin:6px 0 0">نمره قواعد کلمه‌محور</p>
+      </div>
+      <div class="card">
+        <h2>جزئیات نمره</h2>
+        <div id="comps"></div>
+      </div>
+    </div>
+
+    <div class="card section-gap" id="adviceCard">
+      <h2>ریسک‌ها و پیشنهادها</h2>
+      <div id="advice"></div>
+    </div>
+
+    <div class="card section-gap">
+      <h2>کلمات کلیدی آگهی</h2>
+      <div class="tabs" id="kwTabs">
+        <button data-f="all" class="on">همه</button><button data-f="miss">پیدا نشده</button><button data-f="hit">پیدا شده</button>
+      </div>
+      <div style="overflow-x:auto"><table><thead><tr><th>کلمه کلیدی</th><th>اهمیت در آگهی</th><th>وزن</th><th>در رزومه</th><th>شاهد در رزومه</th></tr></thead><tbody id="kwBody"></tbody></table></div>
+      <p class="note">اهمیت از جای کلمه در آگهی تشخیص داده می‌شود: «الزامی» (Requirements و جمله‌های must/required)، «وظیفه» (Tasks)، «امتیاز» (nice to have/advantage). کلمات با برچسب «دیگر» از تکرار عبارت‌ها و اختصارهای خود آگهی استخراج شده‌اند و ممکن است نویز داشته باشند.</p>
+    </div>
+
+    <div class="card section-gap" id="aiCard">
+      <h2>تحلیل معنایی با Claude</h2>
+      <p class="note" style="margin-top:0">ATSهای جدید علاوه بر کلمه کلیدی، معنا را هم می‌سنجند (مثلاً «single cell transcriptomics» را با «scRNA seq» یکی می‌دانند). این بخش رزومه و آگهی را از طریق سرور همین اپ برای Claude می‌فرستد و هر شرط آگهی را جداگانه با شاهد از رزومه بررسی می‌کند. نمره آن جدا از نمره بالاست.</p>
+      <div class="row" id="tokenRow" style="display:none;margin-bottom:10px"><label class="small" for="token" style="margin:0">رمز دسترسی</label><input type="password" id="token" style="max-width:260px" autocomplete="current-password"></div>
+      <button class="btn" id="aiBtn">اجرای تحلیل معنایی</button>
+      <span id="aiStatus" class="note"></span>
+      <div id="aiOut"></div>
+    </div>
+
+    <details class="card section-gap">
+      <summary>متنی که ATS از رزومه شما می‌خواند</summary>
+      <p class="note">اگر ترتیب این متن به هم ریخته، بخش‌ها جابجا شده‌اند یا اطلاعات تماس در آن نیست، احتمالاً پارسر ATS هم همین مشکل را دارد. سرفصل‌های تشخیص‌داده‌شده: <span id="secs"></span></p>
+      <pre id="parsed"></pre>
+    </details>
+
+    <details class="card section-gap">
+      <summary>روش محاسبه</summary>
+      <ul class="list note">
+        <li>نمره کل میانگین وزنی شش بخش است: کلمات کلیدی ۵۰، عنوان شغلی ۱۰، مدرک ۱۰، سابقه ۱۰، زبان ۱۰، ساختار ۱۰. بخشی که آگهی درباره‌اش چیزی نخواسته حذف و وزن‌ها دوباره نرمال می‌شوند.</li>
+        <li>وزن هر کلمه کلیدی: الزامی ۳، وظیفه یا متن عمومی ۲، امتیاز ۱، بخش «ما ارائه می‌دهیم» ۰٫۵. تکرار در آگهی تا ۷۵٪ به وزن اضافه می‌کند. مهارت‌های نرم نصف وزن و کلمات «دیگر» ۶۰٪ وزن دارند.</li>
+        <li>تطابق با واژه‌نامه‌ای از حدود ۱۴۰ مهارت (بیوانفورماتیک، آزمایشگاه مولکولی، شیمی تجزیه و کیفیت، برنامه‌نویسی، پژوهش، مهارت نرم) و معادل‌های رایج آن‌ها انجام می‌شود؛ مثلاً «NGS» با «next generation sequencing» یکی حساب می‌شود.</li>
+        <li>سابقه کار فقط از بازه‌های تاریخ داخل بخش Experience محاسبه می‌شود و بازه‌های هم‌پوشان یک بار شمرده می‌شوند.</li>
+        <li>این وزن‌ها و آستانه‌ها انتخاب طراحی این ابزارند، نه عدد رسمی یک ATS خاص. از نمره برای مقایسه نسخه‌های رزومه خودتان برای یک آگهی استفاده کنید.</li>
+        <li>بازه‌ها: ۸۰ به بالا قوی، ۶۵ تا ۷۹ خوب، ۵۰ تا ۶۴ متوسط، زیر ۵۰ ضعیف.</li>
+      </ul>
+    </details>
+  </div>
+</div>
+
+<script src="engine.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

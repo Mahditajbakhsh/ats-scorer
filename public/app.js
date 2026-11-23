@@ -25,6 +25,8 @@ function setupPdf(){
   return true;
 }
 
+const SAME_ROW_RX = /^(?:(?:[A-Za-z]{3,9}\.?\s+)?\d{4}|\d{1,2}[\/.]\d{4})(?:\s*(?:-|\u2013|\u2014|to)\s*(?:(?:[A-Za-z]{3,9}\.?\s+)?\d{4}|\d{1,2}[\/.]\d{4}|present|current|now|ongoing))?$/i;
+
 async function readPdf(buf){
   if (!setupPdf()) throw new Error(T("pdfLibErr"));
   const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
@@ -47,7 +49,8 @@ async function readPdf(buf){
       for (const it of items) {
         if (prevEnd != null) {
           const gap = it.x - prevEnd;
-          if (gap > vp.width * 0.12 && line.trim().length > 2 && it.s.trim().length > 2) split = true;
+          // A wide gap suggests two columns, unless it is a right-aligned date or a "Label:  value" row.
+          if (gap > vp.width * 0.12 && line.trim().length > 2 && it.s.trim().length > 2 && !SAME_ROW_RX.test(it.s.trim()) && !/:\s*$/.test(line)) split = true;
           if (gap > 1.5 && !line.endsWith(" ") && !it.s.startsWith(" ")) line += gap > vp.width * 0.05 ? "   " : " ";
         }
         line += it.s;

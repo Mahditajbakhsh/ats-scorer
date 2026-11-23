@@ -12,7 +12,7 @@ Live: https://ats-scorer.mahditajbakhsh71.workers.dev
 * **File checks:** PDF and DOCX are parsed in the browser (pdf.js, mammoth). Image-only PDFs, likely multi-column layouts, tables and icon glyphs are flagged, and the extracted text is shown as an ATS parser would see it.
 * **Semantic analysis** through `/api/analyze`: an LLM checks every requirement of the ad against the CV and must quote the CV as evidence. The Anthropic API key stays on the server.
 * **CV improvement** through `/api/improve`: missing keywords are turned into questions, and only items the user confirms are used. Every suggested line must cite its source, either a numbered CV line (`L#`) or a confirmed answer (`U#`). The browser re-checks each suggestion and rejects it if it contains a number, known skill or acronym that is not in its sources; unsupported seniority words such as "led" or "managed" get a warning. Scores before and after are compared. (Idea from [ebarti/JobCtrl](https://github.com/ebarti/JobCtrl); idea only, no code.)
-* **PDF export:** the improved CV can be downloaded as a single-column PDF with real, selectable text (jsPDF, built in the browser, no API call). The PDF is read back with the same parser and re-scored to confirm nothing was lost. Only Latin characters are supported by the standard PDF font; any others are reported.
+* **PDF export:** the improved CV can be downloaded as a clean, single-column PDF with real, selectable text (jsPDF, built in the browser, no API call). The layout uses a navy serif name and section headings, a contact row with small vector icons, job titles with right-aligned dates, bullets, numbered publications (the candidate's surname in bold, the journal in italics) and a two-column table for `Label: value` skill lines. The structure is taken from the CV text itself. The PDF is read back with the same parser and re-scored to confirm nothing was lost. The bundled fonts cover Latin and Latin Extended-A (for example ä, ö, ł, ź); other characters are reported. If the fonts cannot be loaded, the standard PDF fonts are used instead.
 * **Application email** through `/api/email`, written with Llama 3.3 70B on Cloudflare Workers AI (free daily allocation, no Anthropic cost). The model only receives a short list of facts taken verbatim from the CV (name, contact, roles with dates, degree, lines that prove the matched skills, languages). The body is limited to 150 words (one automatic shorter retry), and the browser rejects the email if it contains a number, skill or acronym that is not in those facts or the ad; self-praise filler and unsupported seniority words get a warning.
 * **Dashboard:** a sidebar with the overall score, a ranked list of top fixes and the checks already passed; an overview with the latest and previous score on a 0 to 100 bar with the strong-match threshold.
 * **English and Persian:** English by default; a language menu in the top right switches the whole interface, the report and the model output. The choice is kept in the browser.
@@ -28,6 +28,7 @@ public/            static files (Workers Static Assets)
   engine.js        rule-based scoring engine (no dependencies, also runs in Node)
   app.js           interface, PDF/DOCX reading, API calls
   pdf.js           PDF export of the improved CV
+  fonts/           Source Serif 4 and Noto Sans subsets for the PDF (SIL OFL 1.1)
 src/worker.js      /api/status, /api/analyze, /api/improve and /api/email
 test/              engine tests (node --test)
 wrangler.toml
@@ -96,4 +97,5 @@ npm test                         # engine and Worker route tests
 ## Notes
 
 * pdf.js (3.11.174), mammoth (1.6.0) and jsPDF (2.5.2) are loaded from jsDelivr; jsPDF only when a PDF is downloaded.
+* The PDF fonts are subsets of Source Serif 4 (Adobe) and Noto Sans (The Noto Project Authors), both under the SIL Open Font License 1.1. The licence texts are in `public/fonts/`.
 * The weights and thresholds are design choices of this tool, not official numbers of any ATS. The real algorithms of Workday, Taleo and others are not public. Details are in the "How the score is calculated" section of the page. Use the score to compare versions of your own CV for one ad, not to predict an outcome.

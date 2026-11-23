@@ -71,6 +71,7 @@
     "honors honours grants funding scholarships fellowships references referees volunteering volunteer activities memberships membership patents " +
     "selected key other additional relevant core competencies expertise tools technologies service leadership and of & internships internship").split(/\s+/));
   function isHeadingText(t) {
+    if (root.ATS && root.ATS.isHeadingLike) return root.ATS.isHeadingLike(t);
     const s = t.trim();
     if (!s || s.length > 45 || /\d/.test(s) || /[.:;,!?@]$/.test(s) || /@|https?:|www\./i.test(s)) return false;
     if (/[A-Z]/.test(s) && s === s.toUpperCase() && s.length > 2) return true;

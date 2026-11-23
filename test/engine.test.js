@@ -220,3 +220,38 @@ test("email facts are verbatim CV lines; validation rejects invented content", (
   const long = ATS.validateEmail(Array.from({ length: 160 }, () => "word").join(" "), texts, JD_LAB, { lang: "en" });
   assert.ok(!long.ok && long.words === 160);
 });
+
+test("accepted summary does not delete sections the engine does not know", () => {
+  const cv = ["Jane Doe", "jane@example.org", "", "Profile", "Biologist with NGS experience.", "", "Research Interests", "Single-cell genomics, hypoxia", "",
+    "Conference Presentations", "• EACR 2025, Lisbon – Oral talk", "", "Education", "MSc Biology, 2019 – 2021"].join("\n");
+  const out = ATS.applyImprovements(cv, { summary: { text: "Biologist with NGS experience in single-cell work." }, bullets: [], skills: [] });
+  for (const keep of ["Research Interests", "Single-cell genomics, hypoxia", "Conference Presentations", "EACR 2025, Lisbon", "Education"]) assert.ok(out.includes(keep), keep);
+  assert.ok(!out.includes("Biologist with NGS experience.\n"));
+  assert.deepEqual(ATS.missingLines(cv.split("\n").filter((l) => l !== "Biologist with NGS experience.").join("\n"), out), []);
+});
+
+test("summary body stops at the first paragraph when headings are not recognised", () => {
+  const cv = ["Jane Doe", "", "Summary", "Line one of summary.", "", "Odd Heading Words Zzz", "a", "b", "c", "d", "e", "f", "g", "Education", "MSc"].join("\n");
+  const b = ATS.summaryBody(cv);
+  assert.equal(b.text, "Line one of summary.");
+});
+
+test("rewrites that drop details or replace title lines are rejected", () => {
+  const cv = ["Jane Doe", "", "Experience", "Research Assistant, University of Oulu, 2022 – 2024", "• Ran qPCR on 120 samples with Western blot validation", "", "Skills", "R, Python"].join("\n");
+  assert.ok(ATS.lostDetails("Ran qPCR on 120 samples with Western blot validation", "Ran qPCR assays").includes("120"));
+  assert.deepEqual(ATS.lostDetails("Ran qPCR on 120 samples with Western blot validation", "Performed qPCR on 120 samples and validated results by Western blot"), []);
+  const errTitle = ATS.checkPreserved(cv, { kind: "bullet", replaces: "L3", text: "Research Assistant" }, "en");
+  assert.ok(errTitle.some((e) => /heading, title, date/.test(e)));
+  const errLost = ATS.checkPreserved(cv, { kind: "bullet", replaces: "L4", text: "Ran qPCR assays" }, "en");
+  assert.ok(errLost.some((e) => /drops details/.test(e)));
+  assert.deepEqual(ATS.checkPreserved(cv, { kind: "bullet", replaces: "L4", text: "Performed qPCR on 120 samples and validated results by Western blot" }, "en"), []);
+  const out = ATS.applyImprovements(cv, { bullets: [{ replaces: "L3", text: "x" }], skills: [] });
+  assert.ok(out.includes("Research Assistant, University of Oulu, 2022 – 2024"));
+});
+
+test("missingLines ignores punctuation and wrapping", () => {
+  const src = "PhD Researcher, Oct 2023 – Present\n• Built Nextflow pipelines on the CSC Puhti cluster.\nTools: Git, Docker";
+  const back = "PhD Researcher   Oct 2023 – Present\nBuilt Nextflow pipelines on the CSC\nPuhti cluster.\nTools:   Git, Docker";
+  assert.deepEqual(ATS.missingLines(src, back), []);
+  assert.deepEqual(ATS.missingLines(src + "\nLost line here", back), ["Lost line here"]);
+});

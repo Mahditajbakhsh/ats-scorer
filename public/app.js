@@ -451,10 +451,15 @@ $("impBtn").addEventListener("click", async () => {
 function prepareImprove(d, lines, facts){
   const src = Object.fromEntries([...lines.map((l) => [l.id, l.text]), ...facts.map((f) => [f.id, f.text])]);
   const srcLabel = Object.fromEntries([...lines.map((l) => [l.id, l.text]), ...facts.map((f) => [f.id, T("yourAnswer") + " (" + f.keyword + "): " + f.text])]);
-  const check = (text, ids) => ATS.validateSuggestion(text, (ids || []).map((i) => src[i]).filter(Boolean), I18N.lang);
+  const check = (text, ids, item) => {
+    const v = ATS.validateSuggestion(text, (ids || []).map((i) => src[i]).filter(Boolean), I18N.lang);
+    if (item) v.errors.push(...ATS.checkPreserved(lastInputs.cv, { ...item, text }, I18N.lang));
+    v.ok = v.errors.length === 0;
+    return v;
+  };
   const items = [];
-  if (d.summary) { const v = check(d.summary.text, d.summary.sources); items.push({ kind: "summary", text: d.summary.text, sources: d.summary.sources, v, on: v.ok }); }
-  (d.bullets || []).forEach((b) => { const v = check(b.text, b.sources); items.push({ kind: "bullet", replaces: b.replaces, after: b.after, before: b.replaces ? src[b.replaces] : "", text: b.text, sources: b.sources, v, on: v.ok }); });
+  if (d.summary) { const v = check(d.summary.text, d.summary.sources, { kind: "summary" }); items.push({ kind: "summary", text: d.summary.text, sources: d.summary.sources, v, on: v.ok }); }
+  (d.bullets || []).forEach((b) => { const v = check(b.text, b.sources, { kind: "bullet", replaces: b.replaces }); items.push({ kind: "bullet", replaces: b.replaces, after: b.after, before: b.replaces ? src[b.replaces] : "", text: b.text, sources: b.sources, v, on: v.ok }); });
   (d.add_to_skills || []).forEach((x) => { const v = check(x.text, x.sources); items.push({ kind: "skill", text: x.text, sources: x.sources, v, on: v.ok }); });
   return { items, tips: d.tips || [], srcLabel };
 }
@@ -516,9 +521,21 @@ async function downloadPdf(){
     const o = { title: lastInputs.title, lang: I18N.lang };
     const sText = ATS.score(text, lastInputs.jd, o).overall;
     const sPdf = ATS.score(back.text, lastInputs.jd, o).overall;
+    // Every line must survive: original CV -> improved text (except lines deliberately replaced), improved text -> PDF.
+    const picked = impData.items.filter((x) => x.on && x.v.ok);
+    const replacedIds = new Set(picked.filter((x) => x.kind === "bullet" && x.replaces).map((x) => x.replaces));
+    const sb = picked.some((x) => x.kind === "summary") ? ATS.summaryBody(lastInputs.cv) : null;
+    const kept = ATS.cvLines(lastInputs.cv).filter((l) => !replacedIds.has(l.id) && !(sb && l.index >= sb.start && l.index < sb.end)).map((l) => l.text).join("\n");
+    const lostCv = ATS.missingLines(kept, text);
+    const lostPdf = ATS.missingLines(text, back.text);
+    const nLines = text.split("\n").filter((x) => x.trim()).length;
+    const short = (arr) => arr.slice(0, 5).map((x) => "\u201c" + (x.length > 70 ? x.slice(0, 70) + "\u2026" : x) + "\u201d").join(T("list")) + (arr.length > 5 ? " \u2026" : "");
     const parts = [esc(T("pdfSaved", { file }))];
     if (back.parse.emptyText) parts.push(`<span class="err">${esc(T("pdfNoText"))}</span>`);
     else parts.push(esc(T("pdfCheck", { a: sPdf, b: sText })) + (Math.abs(sPdf - sText) <= 2 ? " ✓" : ` <span class="err">${esc(T("pdfDiff"))}</span>`));
+    if (lostCv.length) parts.push(`<span class="err">${esc(T("cvMissing", { n: N(lostCv.length), list: short(lostCv) }))}</span>`);
+    if (lostPdf.length) parts.push(`<span class="err">${esc(T("pdfMissing", { n: N(lostPdf.length), list: short(lostPdf) }))}</span>`);
+    else parts.push(esc(T("pdfAllLines", { n: N(nLines) })) + " \u2713");
     if (dropped.length) parts.push(`<span class="err">${esc(T("pdfDropped", { chars: dropped.join(" ") }))}</span>`);
     msg.innerHTML = parts.join("<br>");
   } catch (e) {

@@ -353,6 +353,42 @@
     awards: ["awards", "honors", "honours", "grants", "awards and honors", "scholarships", "funding"],
     references: ["references", "referees"],
   };
+  // Any line that looks like a section heading (known or not). Used to bound sections safely.
+  const HEAD_WORDS = new Set(("summary profile objective about me research interests interest education experience work professional employment history " +
+    "academic research projects project publications publication presentations presentation conference conferences talks posters teaching supervision " +
+    "mentoring courses course training certifications certificates licenses skills skill technical computational laboratory languages language awards " +
+    "honors honours grants funding scholarships fellowships references referees volunteering volunteer activities memberships membership patents " +
+    "selected key other additional relevant core competencies expertise tools technologies service leadership and of & internships internship " +
+    "personal statement qualifications achievements interests hobbies outreach peer reviewed methods techniques background").split(/\s+/));
+  const FILLER_HEAD = new Set(["and", "of", "&", "selected", "key", "other", "additional", "relevant", "core", "personal"]);
+  function isHeadingLike(line) {
+    const s = String(line || "").trim();
+    if (!s || s.length > 45 || /\d/.test(s) || /[.:;,!?@]$/.test(s) || /@|https?:|www\./i.test(s) || /^[•\-*▪●◦·]/.test(s)) return false;
+    if (/[A-Z]/.test(s) && s === s.toUpperCase() && s.replace(/[^A-Za-z]/g, "").length > 2) return true;
+    const l = norm(s).trim().replace(/\s*&\s*/g, " and ");
+    if (Object.values(SECTION_DEFS).some((heads) => heads.includes(l))) return true;
+    const words = s.toLowerCase().replace(/&/g, " & ").split(/\s+/).filter(Boolean);
+    return words.length > 0 && words.length <= 5 && words.every((w) => HEAD_WORDS.has(w)) && words.some((w) => !FILLER_HEAD.has(w));
+  }
+  // The body of the Summary/Profile section: from the line after the heading to the next heading-like line.
+  // If that body is suspiciously long (headings not recognised), only its first paragraph counts.
+  function summaryBody(cv) {
+    const ls = String(cv || "").replace(/\r/g, "").split("\n");
+    const sec = detectSections(cv);
+    if (!sec.summary) return null;
+    const start = sec.summary.start + 1;
+    let end = start;
+    while (end < sec.summary.end && !(end > start && isHeadingLike(ls[end]))) end++;
+    const nonEmpty = ls.slice(start, end).filter((x) => x.trim()).length;
+    if (nonEmpty > 6) {
+      let e = start;
+      while (e < end && !ls[e].trim()) e++;
+      while (e < end && ls[e].trim()) e++;
+      end = e;
+    }
+    return { start, end, text: ls.slice(start, end).join("\n").trim() };
+  }
+
   function detectSections(cv) {
     const lines = String(cv || "").replace(/\r/g, "").split("\n");
     const found = {}; // name -> {start, end}
@@ -360,6 +396,8 @@
     lines.forEach((line, i) => {
       const l = norm(line).trim().replace(/\s*&\s*/g, " and ");
       if (!l || l.length > 45) return;
+      // A sentence or a bullet is not a heading, even if it ends with a heading word.
+      if (/[.,;!?]\s*$/.test(line) || /^\s*[•\-*▪●◦·]\s/.test(line)) return;
       for (const [name, heads] of Object.entries(SECTION_DEFS)) {
         if (found[name]) continue;
         if (heads.some((h) => l === h || (l.startsWith(h + " ") && l.split(" ").length <= 5) || (l.endsWith(" " + h) && l.split(" ").length <= 4))) {
@@ -743,6 +781,60 @@
     });
     return { ok: errors.length === 0, errors: [...new Set(errors)], warnings: [...new Set(warnings)] };
   }
+  // Details in an original line that a rewrite drops: numbers, known skills, acronyms and names.
+  function lostDetails(original, rewritten) {
+    const o = String(original || ""), r = String(rewritten || "");
+    const no = norm(o), nr = norm(r), rl = r.toLowerCase().replace(/[‐-―−]/g, "-");
+    const lost = [];
+    const rNums = new Set((r.match(NUM_RE) || []).map((x) => x.replace(/\s/g, "").replace(",", ".").replace("%", "")));
+    (o.match(NUM_RE) || []).forEach((n) => { const k = n.replace(/\s/g, "").replace(",", ".").replace("%", ""); if (!rNums.has(k)) lost.push(n.trim()); });
+    for (const sk of SKILLS) if (skillCount(sk, o, no) > 0 && skillCount(sk, r, nr) === 0) lost.push(sk.k);
+    (o.match(/(?<![A-Za-z0-9])[A-Z][A-Za-z0-9]*[A-Z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)?(?![a-z0-9])/g) || []).forEach((a) => { if (!rl.includes(a.toLowerCase())) lost.push(a); });
+    const words = o.replace(/^[\s•\-*▪●◦·]+/, "").split(/\s+/);
+    words.forEach((w, i) => {
+      const c = w.replace(/[^A-Za-zÀ-ž\-]/g, "");
+      if (i === 0 || c.length < 3 || !/^[A-ZÀ-Þ][a-zß-ÿ]/.test(c) || /[.!?:]$/.test(words[i - 1] || "")) return;
+      if (!rl.includes(c.toLowerCase())) lost.push(c);
+    });
+    return [...new Set(lost)];
+  }
+  // Lines that must never be replaced by a rewritten bullet: headings, title/date lines and the header block.
+  function isReplaceable(cv, lineIndex) {
+    const ls = String(cv || "").replace(/\r/g, "").split("\n");
+    const t = ls[lineIndex];
+    if (t == null || !t.trim() || isHeadingLike(t) || parseRanges(t).length) return false;
+    const firstHead = ls.findIndex((x, i) => i > 0 && isHeadingLike(x));
+    return firstHead >= 0 && lineIndex > firstHead;
+  }
+  // Extra checks for an improvement suggestion so that nothing from the CV is lost.
+  function checkPreserved(cv, item, lang) {
+    if (lang) LANG = lang === "en" ? "en" : "fa";
+    const errors = [];
+    if (item.kind === "bullet" && item.replaces) {
+      const l = cvLines(cv).find((x) => x.id === item.replaces);
+      if (!l) errors.push(tr("خط مقصد پیدا نشد", "the line to replace was not found"));
+      else {
+        if (!isReplaceable(cv, l.index)) errors.push(tr("این خط سرفصل، عنوان، تاریخ یا مشخصات تماس است و نباید جایگزین شود", "it would replace a heading, title, date or contact line"));
+        const lost = lostDetails(l.text, item.text);
+        if (lost.length) errors.push(tr(`این جزئیات از خط اصلی حذف می‌شود: ${lost.join("، ")}`, `it drops details from the original line: ${lost.join(", ")}`));
+      }
+    }
+    if (item.kind === "summary") {
+      const b = summaryBody(cv);
+      if (b && b.text) {
+        const lost = lostDetails(b.text, item.text);
+        if (lost.length) errors.push(tr(`این جزئیات از خلاصه فعلی حذف می‌شود: ${lost.join("، ")}`, `it drops details from the current summary: ${lost.join(", ")}`));
+      }
+    }
+    return errors;
+  }
+  // Lines of src whose words are not found, in order, anywhere in back (used to verify the PDF and the improved text).
+  function missingLines(src, back) {
+    const key = (x) => String(x || "").normalize("NFKC").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+    const hay = " " + key(back) + " ";
+    return String(src || "").replace(/\r/g, "").split("\n").map((x) => x.trim()).filter((x) => key(x) && !hay.includes(" " + key(x) + " "));
+  }
+
   // Build the improved CV text from accepted suggestions.
   function applyImprovements(cv, picks) {
     const raw = String(cv || "").replace(/\r/g, "").split("\n");
@@ -751,7 +843,7 @@
     const replace = new Map(), after = new Map();
     const prefixOf = (t) => (t.match(/^\s*(?:[•\-*▪●◦·]\s*)?/) || [""])[0];
     (picks.bullets || []).forEach((b) => {
-      if (b.replaces && byId[b.replaces]) replace.set(byId[b.replaces].index, prefixOf(raw[byId[b.replaces].index]) + b.text.replace(/^[\s•\-*]+/, ""));
+      if (b.replaces && byId[b.replaces] && isReplaceable(cv, byId[b.replaces].index)) replace.set(byId[b.replaces].index, prefixOf(raw[byId[b.replaces].index]) + b.text.replace(/^[\s•\-*]+/, ""));
       else if (b.after && byId[b.after]) {
         const idx = byId[b.after].index;
         const pre = prefixOf(raw[idx]) || "• ";
@@ -779,8 +871,9 @@
     if (picks.summary && picks.summary.text) {
       const sec = detectSections(text);
       const ls = text.split("\n");
-      if (sec.summary) {
-        ls.splice(sec.summary.start + 1, sec.summary.end - sec.summary.start - 1, picks.summary.text, "");
+      const body = summaryBody(text);
+      if (sec.summary && body) {
+        ls.splice(body.start, body.end - body.start, picks.summary.text, "");
       } else {
         const first = Object.values(sec).reduce((m, x) => Math.min(m, x.start), ls.length);
         ls.splice(first, 0, "PROFILE", picks.summary.text, "");
@@ -871,5 +964,5 @@
     return "";
   }
 
-  root.ATS = { score, extractJDKeywords, detectSections, experienceMonths, parseRanges, dateConsistency, jdYears, jdEducation, norm, SKILLS, guessTitle, hasR, cvLines, validateSuggestion, applyImprovements, buildEmailFacts, validateEmail, skillCount: (k, t) => { const s = SKILLS.find((x) => x.k === k); return s ? skillCount(s, t, norm(t)) : 0; } };
+  root.ATS = { score, extractJDKeywords, detectSections, experienceMonths, parseRanges, dateConsistency, jdYears, jdEducation, norm, SKILLS, guessTitle, hasR, cvLines, validateSuggestion, applyImprovements, buildEmailFacts, isHeadingLike, summaryBody, lostDetails, isReplaceable, checkPreserved, missingLines, validateEmail, skillCount: (k, t) => { const s = SKILLS.find((x) => x.k === k); return s ? skillCount(s, t, norm(t)) : 0; } };
 })(typeof window !== "undefined" ? window : globalThis);

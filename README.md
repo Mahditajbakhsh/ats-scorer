@@ -44,6 +44,10 @@ npm run deploy
 
 اگر کلید Anthropic تنظیم نشود، صفحه کار می‌کند ولی فقط نمره کلمه‌محور را نشان می‌دهد.
 
+## استقرار خودکار
+
+این مخزن به Worker به نام `ats-scorer` در Cloudflare (Workers Builds) وصل است. هر push روی شاخه `main` به‌طور خودکار با `npx wrangler deploy` منتشر می‌شود. secretها (`ANTHROPIC_API_KEY` و `ACCESS_TOKEN`) در داشبورد Cloudflare تنظیم می‌شوند و با deploy پاک نمی‌شوند.
+
 ## اجرای محلی
 
 ```bash

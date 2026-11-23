@@ -5,6 +5,7 @@ const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&":
 const fa = (n) => String(n).replace(/\d/g, (d) => "۰۱۲۳۴۵۶۷۸۹"[d]);
 let cvParse = {};
 let lastResult = null;
+let lastInputs = null;
 
 // ---------- pdf.js setup ----------
 function setupPdf(){
@@ -135,8 +136,9 @@ function render(r, cvText){
       <div class="val">${na ? "؟" : c.score}</div><div class="det">${esc(c.detail)}</div></div>`;
   }).join("");
 
+  renderGate(r.gate || []);
+
   let adv = "";
-  if (r.knockouts.length) adv += `<div class="box bad"><h3>ریسک‌های حذفی احتمالی</h3><ul class="list">${r.knockouts.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></div>`;
   if (r.tips.length) adv += `<div class="box tip"><h3>پیشنهادها</h3><ul class="list">${r.tips.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></div>`;
   const fw = r.warnings.filter((w) => !r.knockouts.includes(w));
   if (fw.length) adv += `<div class="box warn"><h3>ساختار و خوانایی</h3><ul class="list">${fw.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></div>`;
@@ -144,11 +146,24 @@ function render(r, cvText){
   $("advice").innerHTML = adv;
 
   renderKw("all");
+  renderQuestions(r);
   $("parsed").textContent = cvText;
   $("secs").innerHTML = r.sections.length ? r.sections.map((s) => `<bdi>${esc(s)}</bdi>`).join("، ") : "هیچ‌کدام";
   $("aiOut").innerHTML = ""; if (aiReady) $("aiStatus").textContent = "";
   $("results").scrollIntoView({ behavior: "smooth", block: "start" });
 }
+const GS = { pass: ["قبول", "st-pass"], fail: ["رد", "st-fail"], unknown: ["نامعلوم", "st-unknown"] };
+function renderGate(gate){
+  $("gateCard").style.display = gate.length ? "" : "none";
+  const fails = gate.filter((g) => g.status === "fail").length, unk = gate.filter((g) => g.status === "unknown").length;
+  $("gateBanner").innerHTML = fails ? `<div class="box bad" style="margin:0 0 10px"><h3>${fa(fails)} شرط حذفی رد شده</h3>با این وضعیت احتمال حذف خودکار زیاد است، حتی اگر نمره بالا باشد.</div>`
+    : unk ? `<div class="box warn" style="margin:0 0 10px">هیچ شرطی رد نشده؛ ${fa(unk)} مورد نامعلوم است.</div>`
+    : `<div class="box tip" style="margin:0 0 10px">همه شرط‌های حذفی قابل‌تشخیص قبول هستند.</div>`;
+  $("gateBody").innerHTML = gate.map((g) => `<tr><td>${esc(g.label)}</td><td class="en">${esc(g.requirement)}</td>
+    <td><span class="st ${GS[g.status][1]}">${GS[g.status][0]}</span></td>
+    <td>${g.evidence ? `<bdi>${esc(g.evidence)}</bdi><br>` : ""}<span class="note">${esc(g.note)}</span></td></tr>`).join("");
+}
+
 function renderKw(f){
   if (!lastResult) return;
   document.querySelectorAll("#kwTabs button").forEach((b) => b.classList.toggle("on", b.dataset.f === f));
@@ -169,7 +184,8 @@ $("run").addEventListener("click", () => {
   if (cv.trim().split(/\s+/).length < 30) { $("runErr").textContent = "متن رزومه خیلی کوتاه است یا خالی است."; return; }
   if (jd.trim().split(/\s+/).length < 25) { $("runErr").textContent = "متن آگهی خیلی کوتاه است؛ متن کامل آگهی را بچسبانید."; return; }
   try {
-    lastResult = ATS.score(cv, jd, { title: $("title").value, parse: cvParse });
+    lastInputs = { cv, jd, title: $("title").value, parse: cvParse };
+    lastResult = ATS.score(cv, jd, { title: lastInputs.title, parse: cvParse });
     render(lastResult, cv);
   } catch (e) { $("runErr").textContent = "خطا در محاسبه: " + (e.message || e); }
 });
@@ -230,5 +246,120 @@ function renderAi(d){
   if (rs.length) h += `<div class="box tip"><h3>پیشنهاد بازنویسی (فقط بر پایه محتوای فعلی رزومه)</h3><ul class="list">${rs.map((s) => `<li><b><bdi>${esc(s.section || "")}</bdi></b>: ${esc(s.suggestion || "")}${s.based_on ? ` <span class="note">(بر اساس: <bdi>${esc(s.based_on)}</bdi>)</span>` : ""}</li>`).join("")}</ul></div>`;
   h += `<p class="note">این تحلیل را یک مدل زبانی انجام داده و ممکن است خطا داشته باشد؛ شاهدها را با رزومه خودتان چک کنید.</p>`;
   $("aiOut").innerHTML = h;
+}
+
+// ---------- Improve mode ----------
+function renderQuestions(r){
+  $("impOut").innerHTML = ""; $("impStatus").textContent = "";
+  const miss = r.keywords.filter((k) => !k.hit && !k.soft).sort((a, b) => b.weight - a.weight).slice(0, 12);
+  if (!miss.length) { $("impQ").innerHTML = '<p class="note">همه کلمات کلیدی سخت آگهی در رزومه هست. باز هم می‌توانید بازنویسی بگیرید.</p>'; return; }
+  $("impQ").innerHTML = `<p class="note" style="margin:0 0 6px">این‌ها در آگهی هست و در رزومه نیست. فقط مواردی را تیک بزنید که واقعاً دارید و یک خط بنویسید کجا و چطور (به انگلیسی). موارد تیک‌نخورده وارد رزومه نمی‌شوند.</p>` +
+    miss.map((k, i) => `<div class="q"><input type="checkbox" id="q${i}" data-kw="${esc(k.name)}"><label class="kw" for="q${i}">${esc(k.name)} <span class="tag ${(LV[k.level] || LV.neutral)[1]}">${(LV[k.level] || LV.neutral)[0]}</span></label>
+      <input type="text" id="qa${i}" placeholder="e.g. Used ${esc(k.name)} daily at Example Institute (2021-2022)" disabled></div>`).join("");
+  miss.forEach((k, i) => $("q" + i).addEventListener("change", (e) => { $("qa" + i).disabled = !e.target.checked; if (e.target.checked) $("qa" + i).focus(); }));
+}
+
+let impData = null, impBusy = false;
+$("impBtn").addEventListener("click", async () => {
+  if (impBusy) return;
+  if (!lastResult || !lastInputs) { $("impStatus").innerHTML = '<span class="err">اول نمره را محاسبه کنید.</span>'; return; }
+  if (!aiReady) { $("impStatus").innerHTML = '<span class="err">کلید Anthropic روی سرور تنظیم نشده؛ این بخش به Claude نیاز دارد.</span>'; return; }
+  const facts = [];
+  let bad = false;
+  document.querySelectorAll("#impQ input[type=checkbox]").forEach((cb) => {
+    if (!cb.checked) return;
+    const ans = $("qa" + cb.id.slice(1)).value.trim();
+    if (!ans) bad = true; else facts.push({ id: "U" + (facts.length + 1), keyword: cb.dataset.kw, text: ans });
+  });
+  if (bad) { $("impStatus").innerHTML = '<span class="err">برای هر مورد تیک‌خورده یک خط توضیح بنویسید.</span>'; return; }
+  $("impExtra").value.split("\n").map((x) => x.trim()).filter(Boolean).slice(0, 10).forEach((t) => facts.push({ id: "U" + (facts.length + 1), keyword: "other", text: t }));
+  const lines = ATS.cvLines(lastInputs.cv).map(({ id, text }) => ({ id, text }));
+  const targets = lastResult.keywords.filter((k) => !k.soft).map((k) => k.name);
+  impBusy = true; $("impBtn").disabled = true;
+  $("impStatus").innerHTML = ' <span class="spinner"></span> در حال بازنویسی… (ممکن است تا دو دقیقه طول بکشد)';
+  $("impOut").innerHTML = "";
+  try {
+    const headers = { "content-type": "application/json" };
+    const tok = needToken ? $("token").value.trim() : "";
+    if (tok) { headers.authorization = "Bearer " + tok; setToken(tok); }
+    if (needToken && !tok) throw new Error("رمز دسترسی را در بخش تحلیل معنایی وارد کنید.");
+    const r = await fetch("api/improve", { method: "POST", headers, body: JSON.stringify({ cv: lastInputs.cv, jd: lastInputs.jd, lines, facts, targets }) });
+    const data = await r.json().catch(() => ({}));
+    if (r.status === 401) throw new Error("رمز دسترسی درست نیست.");
+    if (r.status === 429) throw new Error("تعداد درخواست‌ها زیاد بود؛ کمی بعد دوباره امتحان کنید.");
+    if (!r.ok) throw new Error(data.error || ("HTTP " + r.status));
+    impData = prepareImprove(data, lines, facts);
+    renderImprove();
+    $("impStatus").textContent = "";
+  } catch (e) {
+    $("impStatus").innerHTML = '<span class="err">انجام نشد: ' + esc((e && e.message) || e) + "</span>";
+  } finally { impBusy = false; $("impBtn").disabled = false; }
+});
+
+// Validate every suggestion against its cited sources; rejected ones can't be selected.
+function prepareImprove(d, lines, facts){
+  const src = Object.fromEntries([...lines.map((l) => [l.id, l.text]), ...facts.map((f) => [f.id, f.text])]);
+  const srcLabel = Object.fromEntries([...lines.map((l) => [l.id, l.text]), ...facts.map((f) => [f.id, "پاسخ شما (" + f.keyword + "): " + f.text])]);
+  const check = (text, ids) => ATS.validateSuggestion(text, (ids || []).map((i) => src[i]).filter(Boolean));
+  const items = [];
+  if (d.summary) { const v = check(d.summary.text, d.summary.sources); items.push({ kind: "summary", text: d.summary.text, sources: d.summary.sources, v, on: v.ok }); }
+  (d.bullets || []).forEach((b) => { const v = check(b.text, b.sources); items.push({ kind: "bullet", replaces: b.replaces, after: b.after, before: b.replaces ? src[b.replaces] : "", text: b.text, sources: b.sources, v, on: v.ok }); });
+  (d.add_to_skills || []).forEach((x) => { const v = check(x.text, x.sources); items.push({ kind: "skill", text: x.text, sources: x.sources, v, on: v.ok }); });
+  return { items, tips: d.tips || [], srcLabel };
+}
+
+function improvedText(){
+  const picks = { bullets: [], skills: [] };
+  impData.items.filter((x) => x.on && x.v.ok).forEach((x) => {
+    if (x.kind === "summary") picks.summary = { text: x.text };
+    else if (x.kind === "bullet") picks.bullets.push({ replaces: x.replaces, after: x.after, text: x.text });
+    else picks.skills.push({ text: x.text });
+  });
+  return ATS.applyImprovements(lastInputs.cv, picks);
+}
+
+function renderImprove(){
+  const it = impData.items;
+  const ok = it.filter((x) => x.v.ok).length, rej = it.length - ok;
+  const srcChips = (ids) => (ids || []).map((i) => `<span class="src" title="${esc(impData.srcLabel[i] || "")}">${esc(i)}</span>`).join("") || '<span class="no">بدون منبع</span>';
+  const KIND = { summary: "خلاصه پروفایل", bullet: "بولت", skill: "مهارت برای بخش Skills" };
+  let h = `<p class="note">${fa(it.length)} پیشنهاد: ${fa(ok)} معتبر، ${fa(rej)} رد شده. روی شناسه منبع (مثلاً L10) نگه دارید تا متن منبع را ببینید.</p>`;
+  h += it.map((x, i) => {
+    const head = `<div class="head"><label><input type="checkbox" data-i="${i}" ${x.on ? "checked" : ""} ${x.v.ok ? "" : "disabled"}> <b>${KIND[x.kind]}</b>${x.kind === "bullet" ? (x.replaces ? ` <span class="note">جایگزین ${esc(x.replaces)}</span>` : ` <span class="note">بولت جدید بعد از ${esc(x.after)}</span>`) : ""}</label>
+      <span>منبع: ${srcChips(x.sources)}</span></div>`;
+    const body = (x.before ? `<div class="before">${esc(x.before)}</div>` : "") + `<div class="after">${esc(x.text)}</div>`;
+    const errs = x.v.errors.length ? `<div class="err" style="margin-top:6px">رد شد: ${x.v.errors.map(esc).join("، ")}</div>` : "";
+    const warns = x.v.warnings.length ? `<div class="note" style="margin-top:6px;color:var(--warn)">بررسی کنید: ${x.v.warnings.map(esc).join("، ")}</div>` : "";
+    return `<div class="sug ${x.v.ok ? "" : "rej"}">${head}${body}${errs}${warns}</div>`;
+  }).join("");
+  if (impData.tips.length) h += `<div class="box tip"><h3>نکته‌ها</h3><ul class="list">${impData.tips.map((t) => `<li>${esc(t)}</li>`).join("")}</ul></div>`;
+  h += `<div class="card section-gap" style="background:var(--bg)"><h2>نمره قبل و بعد</h2><div id="impCmp"></div>
+    <div class="actions"><button class="btn" id="impCopy">کپی رزومه جدید</button><button class="btn ghost" id="impUse">جایگزین در کادر رزومه و محاسبه دوباره</button><span id="impCopyMsg" class="note"></span></div>
+    <details><summary>متن کامل رزومه جدید</summary><pre id="impText"></pre></details></div>`;
+  $("impOut").innerHTML = h;
+  $("impOut").querySelectorAll("input[type=checkbox][data-i]").forEach((cb) => cb.addEventListener("change", () => { impData.items[+cb.dataset.i].on = cb.checked; updateCompare(); }));
+  $("impCopy").addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText(improvedText()); $("impCopyMsg").textContent = "کپی شد."; }
+    catch (e) { $("impCopyMsg").textContent = "کپی خودکار ممکن نشد؛ متن را از بخش «متن کامل» دستی کپی کنید."; }
+  });
+  $("impUse").addEventListener("click", () => { $("cv").value = improvedText(); cvParse = {}; $("cvInfo").textContent = "متن بهبودیافته جایگزین شد."; $("run").click(); });
+  updateCompare();
+}
+
+function updateCompare(){
+  const text = improvedText();
+  const after = ATS.score(text, lastInputs.jd, { title: lastInputs.title });
+  const before = ATS.score(lastInputs.cv, lastInputs.jd, { title: lastInputs.title });
+  const d = (a, b) => (a == null || b == null) ? "" : b > a ? `<span class="up">+${b - a}</span>` : b < a ? `<span class="down">${b - a}</span>` : "۰";
+  let h = `<div class="cmp"><div class="h">بخش</div><div class="h">قبل</div><div class="h">بعد</div><div class="h">تغییر</div>
+    <div><b>نمره کل</b></div><div><b>${before.overall}</b></div><div><b>${after.overall}</b></div><div>${d(before.overall, after.overall)}</div>`;
+  for (const k of Object.keys(before.components)) {
+    const a = before.components[k].score, b = after.components[k].score;
+    h += `<div>${esc(before.components[k].label)}</div><div>${a == null ? "؟" : a}</div><div>${b == null ? "؟" : b}</div><div>${d(a, b)}</div>`;
+  }
+  const fb = before.gate.filter((g) => g.status === "fail").length, fa2 = after.gate.filter((g) => g.status === "fail").length;
+  h += `<div>شرط‌های حذفی رد شده</div><div>${fb}</div><div>${fa2}</div><div>${fa2 < fb ? `<span class="up">${fa2 - fb}</span>` : ""}</div></div>`;
+  $("impCmp").innerHTML = h;
+  $("impText").textContent = text;
 }
 })();

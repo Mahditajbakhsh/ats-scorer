@@ -111,3 +111,83 @@ test("scanned PDF caps the overall score", () => {
   const r = ATS.score(CV, JD_LAB, { now: NOW, parse: { emptyText: true } });
   assert.ok(r.overall <= 10);
 });
+
+// ---------- Knockout gate ----------
+test("gate: Finnish fails, work permit unknown, degree and years pass", () => {
+  const r = ATS.score(CV, JD_LAB, { now: NOW });
+  const g = Object.fromEntries(r.gate.map((x) => [x.label, x.status]));
+  assert.strictEqual(g["زبان Finnish"], "fail");
+  assert.strictEqual(g["زبان English"], "pass");
+  assert.strictEqual(g["مجوز کار"], "unknown", "missing info is not a failure");
+  assert.strictEqual(g["مدرک تحصیلی"], "pass");
+  assert.strictEqual(g["سال‌های سابقه"], "pass");
+});
+
+test("gate: preferred language is not a knockout", () => {
+  const jd = JD_LAB.replace("• Good command of Finnish and English", "• Good command of English").replace("Considered an advantage:", "Considered an advantage:\n• Swedish skills");
+  const r = ATS.score(CV, jd, { now: NOW });
+  assert.ok(!r.gate.some((x) => x.label.includes("Swedish")));
+});
+
+// ---------- Date consistency ----------
+test("dates: inverted, future, mixed formats and gaps are flagged", () => {
+  const cv = "EXPERIENCE\nLab tech, A, 01/2015 – Mar 2016\nEngineer, B, Jan 2019 – Dec 2018\nFuture job Jan 2029 – Present\nEDUCATION\nMSc 2016 – 2017\n";
+  const d = ATS.dateConsistency(cv, ATS.detectSections(cv), NOW);
+  const all = d.issues.join(" ");
+  assert.match(all, /Jan 2019 - Dec 2018/);
+  assert.match(all, /آینده/);
+  assert.match(all, /دو قالب/);
+  const inv = d.issues.find((x) => x.includes("پایان قبل از شروع")) || "";
+  assert.ok(!inv.includes("2029"), "a future start with Present is not inverted");
+  assert.ok(d.score < 50);
+});
+
+test("dates: study periods cover gaps between jobs", () => {
+  const cv = "EXPERIENCE\nJob A, Jan 2015 – Dec 2016\nJob B, Jan 2019 – Present\nEDUCATION\nMSc, Jan 2017 – Dec 2018\n";
+  const d = ATS.dateConsistency(cv, ATS.detectSections(cv), NOW);
+  assert.ok(!d.issues.some((x) => x.includes("فاصله")));
+  assert.strictEqual(d.score, 100);
+});
+
+test("dates: month names only (no 'Intern 2020' false month)", () => {
+  const r = ATS.parseRanges("Intern 2020 – 2021", NOW);
+  assert.strictEqual(r.length, 1);
+  assert.strictEqual(r[0].fmtA, "year");
+});
+
+// ---------- Improve mode validation ----------
+test("validation rejects invented numbers, skills and acronyms", () => {
+  const src = ["• HPLC analysis of nanoparticle drug release samples, method development"];
+  const ok = ATS.validateSuggestion("Performed HPLC analysis of drug release samples and developed methods", src);
+  assert.ok(ok.ok, JSON.stringify(ok));
+  const bad = ATS.validateSuggestion("Performed HPLC and GC-MS analysis of 200 samples in LIMS", src);
+  assert.ok(!bad.ok);
+  assert.ok(bad.errors.some((e) => e.includes("200")));
+  assert.ok(bad.errors.some((e) => e.includes("LIMS")));
+  assert.ok(!ATS.validateSuggestion("Anything", []).ok, "no sources means rejected");
+});
+
+test("method validation is not accepted as a synonym of method development", () => {
+  const v = ATS.validateSuggestion("Led method validation for HPLC assays", ["HPLC analysis, method development"]);
+  assert.ok(!v.ok);
+});
+
+test("apply: replaces bullets keeping the bullet sign, inserts new ones, extends skills and summary", () => {
+  const out = ATS.applyImprovements(CV, {
+    summary: { text: "Lab researcher with HPLC experience." },
+    bullets: [{ replaces: "L10", text: "Performed HPLC analysis and method development" }, { after: "L12", text: "Recorded results in LIMS" }],
+    skills: [{ text: "LIMS" }],
+  });
+  assert.match(out, /\n• Performed HPLC analysis and method development\n/);
+  assert.match(out, /• Wrote SOPs and maintained lab safety records\n• Recorded results in LIMS/);
+  assert.match(out, /data visualization, LIMS/);
+  assert.match(out, /PROFILE\nLab researcher with HPLC experience\./);
+  assert.ok(!out.includes("Molecular biologist and bioinformatician with experience"), "old summary replaced");
+});
+
+test("validation warns about seniority words that the source does not support", () => {
+  const v = ATS.validateSuggestion("Performed HPLC analysis and led method development", ["HPLC analysis, method development"]);
+  assert.ok(v.ok, "a warning, not a rejection");
+  assert.ok(v.warnings.some((w) => w.includes("led")));
+  assert.strictEqual(ATS.validateSuggestion("Led a team of 3", ["Led a team of 3 students"]).warnings.length, 0);
+});

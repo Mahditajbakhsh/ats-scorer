@@ -191,3 +191,14 @@ test("validation warns about seniority words that the source does not support", 
   assert.ok(v.warnings.some((w) => w.includes("led")));
   assert.strictEqual(ATS.validateSuggestion("Led a team of 3", ["Led a team of 3 students"]).warnings.length, 0);
 });
+
+test("English report: labels, gate and validation messages contain no Persian", () => {
+  const r = ATS.score(CV, JD_LAB, { now: NOW, lang: "en" });
+  const text = JSON.stringify({ c: r.components, g: r.gate, t: r.tips, w: r.warnings, k: r.knockouts });
+  assert.ok(!/[؀-ۿ]/.test(text), "no Persian characters in English output");
+  assert.strictEqual(r.components.keywords.label, "Keyword match");
+  const v = ATS.validateSuggestion("Used LIMS on 200 samples", ["HPLC"], "en");
+  assert.ok(v.errors.every((e) => !/[؀-ۿ]/.test(e)));
+  // the default stays Persian
+  assert.match(ATS.score(CV, JD_LAB, { now: NOW }).components.keywords.label, /[؀-ۿ]/);
+});

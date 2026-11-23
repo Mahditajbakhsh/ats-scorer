@@ -92,3 +92,10 @@ pre{white-space:pre-wrap;direction:ltr;text-align:left;font:12.5px/1.6 ui-monosp
 .cmp div{padding:4px 0;border-bottom:1px solid var(--line)}
 .cmp .h{color:var(--muted);font-size:12.5px}
 .up{color:var(--good);font-weight:700} .down{color:var(--bad);font-weight:700}
+.topbar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:6px}
+.topbar h1{margin:0}
+#langBtn{font-family:Inter,Vazirmatn,sans-serif}
+html[dir=ltr] body{font-family:Inter,system-ui,sans-serif}
+html[dir=ltr] th,html[dir=ltr] td{text-align:left}
+html[dir=ltr] .list{padding:0 0 0 18px}
+html[dir=ltr] .comp .val{text-align:right}

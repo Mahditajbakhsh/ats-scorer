@@ -158,6 +158,13 @@
 
   const ACRO_STOP = new Set(["EU", "CV", "PDF", "FI", "HR", "CEO", "CTO", "OY", "AB", "LTD", "INC", "PHD", "MSC", "BSC", "MS", "BA", "MA", "PH", "D", "I", "II", "III", "IV", "US", "USA", "UK", "AI", "IT", "TBD", "FAQ", "URL", "WWW", "HTTP", "HTTPS", "COM", "GMBH", "EUR", "ID", "OK", "NB", "PS", "VAT", "CET", "EET", "AM", "PM", "UTC", "DOI", "ORCID", "LINKEDIN", "THE", "AND", "FOR", "YOU", "WE", "OUR", "CEST", "EEST", "Q"]);
 
+  // ---------- Language ----------
+  let LANG = "fa";
+  const tr = (fa, en) => (LANG === "en" ? en : fa);
+  const J = () => tr("، ", ", ");
+  const SEP = () => tr("؛ ", "; ");
+  const q = (x) => tr("«" + x + "»", "\u201c" + x + "\u201d");
+
   // ---------- Text helpers ----------
   function norm(s) {
     return (" " + String(s || "") + " ")
@@ -430,24 +437,25 @@
   const MN = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   const fmtM = (m) => MN[m % 12] + " " + Math.floor(m / 12);
   // Date consistency: inverted or future ranges, mixed formats, unexplained gaps.
-  function dateConsistency(cv, sections, nowDate) {
+  function dateConsistency(cv, sections, nowDate, lang) {
+    if (lang) LANG = lang === "en" ? "en" : "fa";
     const nowM = nowMonth(nowDate);
     const expText = sections.experience ? sections.experience.text : "";
     const eduText = sections.education ? sections.education.text : "";
     const exp = parseRanges(expText, nowDate);
     const all = parseRanges(cv, nowDate);
-    if (!all.length) return { score: null, issues: [], detail: "هیچ بازه تاریخی در رزومه پیدا نشد" };
+    if (!all.length) return { score: null, issues: [], detail: tr("هیچ بازه تاریخی در رزومه پیدا نشد", "No date ranges found in the CV") };
     const issues = [];
     let pen = 0;
-    if (sections.experience && !exp.length) { pen += 40; issues.push("بخش Experience بازه تاریخ قابل‌خواندن ندارد"); }
+    if (sections.experience && !exp.length) { pen += 40; issues.push(tr("بخش Experience بازه تاریخ قابل‌خواندن ندارد", "The Experience section has no readable date ranges")); }
     const inv = all.filter((r) => r.inverted);
-    if (inv.length) { pen += Math.min(50, 25 * inv.length); issues.push("تاریخ پایان قبل از شروع: " + inv.map((r) => "«" + r.raw + "»").join("، ")); }
+    if (inv.length) { pen += Math.min(50, 25 * inv.length); issues.push(tr("تاریخ پایان قبل از شروع: ", "End date before start date: ") + inv.map((r) => q(r.raw)).join(J())); }
     const fut = all.filter((r) => r.future);
-    if (fut.length) { pen += 25; issues.push("تاریخ در آینده: " + fut.map((r) => "«" + r.raw + "»").join("، ")); }
+    if (fut.length) { pen += 25; issues.push(tr("تاریخ در آینده: ", "Date in the future: ") + fut.map((r) => q(r.raw)).join(J())); }
     const fmts = new Set();
     exp.forEach((r) => [r.fmtA, r.fmtB].forEach((f) => { if (f !== "present") fmts.add(f); }));
-    if (fmts.has("mon") && fmts.has("num")) { pen += 15; issues.push("در بخش Experience دو قالب تاریخ مختلف آمده (مثلاً «Jan 2020» و «01/2020»)؛ یکی را انتخاب کنید"); }
-    else if (fmts.has("year") && (fmts.has("mon") || fmts.has("num"))) { pen += 10; issues.push("در بخش Experience بعضی تاریخ‌ها با ماه و بعضی فقط با سال آمده‌اند؛ یکدست کنید"); }
+    if (fmts.has("mon") && fmts.has("num")) { pen += 15; issues.push(tr("در بخش Experience دو قالب تاریخ مختلف آمده (مثلاً «Jan 2020» و «01/2020»)؛ یکی را انتخاب کنید", "The Experience section mixes two date formats (e.g. \u201cJan 2020\u201d and \u201c01/2020\u201d); pick one")); }
+    else if (fmts.has("year") && (fmts.has("mon") || fmts.has("num"))) { pen += 10; issues.push(tr("در بخش Experience بعضی تاریخ‌ها با ماه و بعضی فقط با سال آمده‌اند؛ یکدست کنید", "In the Experience section some dates have months and some only years; make them consistent")); }
     // Gaps: education periods count as covered time.
     const cover = mergeIntervals(parseRanges(expText + "\n" + eduText, nowDate).filter((r) => !r.inverted && !r.future).map((r) => [r.start, Math.min(r.end, nowM)]));
     const gaps = [];
@@ -459,9 +467,9 @@
       const tail = nowM - cover[cover.length - 1][1];
       if (tail > 6) gaps.push([cover[cover.length - 1][1] + 1, nowM, tail]);
     }
-    if (gaps.length) { pen += Math.min(30, 10 * gaps.length); issues.push("فاصله بیش از ۶ ماه بدون توضیح: " + gaps.map((g) => fmtM(g[0]) + " تا " + fmtM(g[1]) + " (" + g[2] + " ماه)").join("، ") + ". اگر دلیلی دارد (دوره، مهاجرت، پروژه شخصی)، یک خط برایش بنویسید."); }
+    if (gaps.length) { pen += Math.min(30, 10 * gaps.length); issues.push(tr("فاصله بیش از ۶ ماه بدون توضیح: ", "Unexplained gap of more than 6 months: ") + gaps.map((g) => fmtM(g[0]) + tr(" تا ", " to ") + fmtM(g[1]) + " (" + g[2] + tr(" ماه)", " months)")).join(J()) + tr(". اگر دلیلی دارد (دوره، مهاجرت، پروژه شخصی)، یک خط برایش بنویسید.", ". If there is a reason (course, relocation, personal project), add a line for it.")); }
     const score = Math.max(0, 100 - pen);
-    return { score, issues, detail: issues.length ? issues.join("؛ ") : `${all.length} بازه تاریخ بررسی شد؛ مشکلی پیدا نشد` };
+    return { score, issues, detail: issues.length ? issues.join(SEP()) : tr(`${all.length} بازه تاریخ بررسی شد؛ مشکلی پیدا نشد`, `${all.length} date ranges checked; no problems found`) };
   }
   function jdYears(jd) {
     const t = String(jd || "").replace(/[‐-―−]/g, "-");
@@ -514,6 +522,7 @@
   // ---------- Main scoring ----------
   function score(cvText, jdText, opts) {
     opts = opts || {};
+    LANG = opts.lang === "en" ? "en" : "fa";
     const cv = String(cvText || "");
     const jd = String(jdText || "");
     const ncv = norm(cv);
@@ -536,15 +545,15 @@
     const hard = kw.filter((k) => !k.soft), soft = kw.filter((k) => k.soft);
     result.keywords = kw;
     result.components.keywords = {
-      label: "تطابق کلمات کلیدی",
+      label: tr("تطابق کلمات کلیدی", "Keyword match"),
       weight: 50,
       score: wTot ? Math.round((wHit / wTot) * 100) : null,
-      detail: kw.length ? `${kw.filter((k) => k.hit).length} از ${kw.length} کلمه کلیدی آگهی در رزومه پیدا شد (سخت: ${hard.filter((k) => k.hit).length}/${hard.length}، نرم: ${soft.filter((k) => k.hit).length}/${soft.length})` : "کلمه کلیدی قابل تشخیصی در آگهی پیدا نشد",
+      detail: kw.length ? tr(`${kw.filter((k) => k.hit).length} از ${kw.length} کلمه کلیدی آگهی در رزومه پیدا شد (سخت: ${hard.filter((k) => k.hit).length}/${hard.length}، نرم: ${soft.filter((k) => k.hit).length}/${soft.length})`, `${kw.filter((k) => k.hit).length} of ${kw.length} job ad keywords found in the CV (hard: ${hard.filter((k) => k.hit).length}/${hard.length}, soft: ${soft.filter((k) => k.hit).length}/${soft.length})`) : tr("کلمه کلیدی قابل تشخیصی در آگهی پیدا نشد", "No recognisable keywords found in the job ad"),
     };
     const reqMissing = kw.filter((k) => !k.hit && k.level === "req" && !k.soft);
-    if (reqMissing.length) result.tips.push("مهارت‌های «الزامی» که در رزومه نیست: " + reqMissing.slice(0, 8).map((k) => k.name).join("، ") + ". اگر واقعاً این تجربه را دارید، با همان عبارتی که آگهی استفاده کرده در رزومه بیاورید.");
+    if (reqMissing.length) result.tips.push(tr("مهارت‌های «الزامی» که در رزومه نیست: ", "\u201cRequired\u201d skills missing from the CV: ") + reqMissing.slice(0, 8).map((k) => k.name).join(J()) + tr(". اگر واقعاً این تجربه را دارید، با همان عبارتی که آگهی استفاده کرده در رزومه بیاورید.", ". If you really have this experience, use the same wording as the job ad."));
     const hitNotInSkills = kw.filter((k) => k.hit && !k.soft && !k.inSkills && sections.skills).slice(0, 6);
-    if (hitNotInSkills.length) result.tips.push("این مهارت‌ها در رزومه هست ولی در بخش Skills نیامده: " + hitNotInSkills.map((k) => k.name).join("، ") + ". بعضی ATSها بخش Skills را جدا می‌خوانند.");
+    if (hitNotInSkills.length) result.tips.push(tr("این مهارت‌ها در رزومه هست ولی در بخش Skills نیامده: ", "These skills are in the CV but not in the Skills section: ") + hitNotInSkills.map((k) => k.name).join(J()) + tr(". بعضی ATSها بخش Skills را جدا می‌خوانند.", ". Some ATSs read the Skills section separately."));
 
     // 2. Job title
     const title = (opts.title || "").trim() || guessTitle(jd);
@@ -555,9 +564,10 @@
       if (countAlias(ncv, nt)) s = 100;
       else if (sig.length) { const h = sig.filter((w) => countAlias(ncv, w)).length; s = Math.round((h / sig.length) * 70); }
       else s = null;
-      result.components.title = { label: "عنوان شغلی", weight: 10, score: s, detail: `عنوان: «${title}»` + (s === 100 ? " دقیقاً در رزومه آمده" : s != null ? `؛ ${sig.filter((w) => countAlias(ncv, w)).length} از ${sig.length} واژه اصلی عنوان در رزومه هست` : "") };
-      if (s != null && s < 100) result.tips.push(`عنوان «${title}» عیناً در رزومه نیست. اگر با واقعیت جور است، آن را در خلاصه بالای رزومه بیاورید (مثلاً «… with experience as/aiming for ${title}»).`);
-    } else result.components.title = { label: "عنوان شغلی", weight: 10, score: null, detail: "عنوان شغلی مشخص نشد؛ آن را در کادر عنوان وارد کنید" };
+      const th = sig.filter((w) => countAlias(ncv, w)).length;
+      result.components.title = { label: tr("عنوان شغلی", "Job title"), weight: 10, score: s, detail: tr("عنوان: ", "Title: ") + q(title) + (s === 100 ? tr(" دقیقاً در رزومه آمده", " appears verbatim in the CV") : s != null ? tr(`؛ ${th} از ${sig.length} واژه اصلی عنوان در رزومه هست`, `; ${th} of ${sig.length} key title words are in the CV`) : "") };
+      if (s != null && s < 100) result.tips.push(tr(`عنوان «${title}» عیناً در رزومه نیست. اگر با واقعیت جور است، آن را در خلاصه بالای رزومه بیاورید (مثلاً «… with experience as/aiming for ${title}»).`, `The title \u201c${title}\u201d is not in the CV verbatim. If it is accurate, put it in the summary at the top (e.g. \u201c\u2026 aiming for a ${title} role\u201d).`));
+    } else result.components.title = { label: tr("عنوان شغلی", "Job title"), weight: 10, score: null, detail: tr("عنوان شغلی مشخص نشد؛ آن را در کادر عنوان وارد کنید", "Job title not detected; enter it in the title box") };
 
     // 3. Education
     const je = jdEducation(jd);
@@ -569,11 +579,12 @@
       let fieldNote = "";
       if (je.fields.length) {
         const fh = je.fields.filter((w) => countAlias(ncv, w));
-        fieldNote = `؛ رشته: ${fh.length} از ${je.fields.length} واژه («${je.fields.join(", ")}») در رزومه هست`;
+        fieldNote = tr(`؛ رشته: ${fh.length} از ${je.fields.length} واژه («${je.fields.join(", ")}») در رزومه هست`, `; field: ${fh.length} of ${je.fields.length} words (\u201c${je.fields.join(", ")}\u201d) are in the CV`);
         s = Math.round(s * 0.8 + (fh.length ? 20 : 0));
       }
-      result.components.education = { label: "مدرک تحصیلی", weight: 10, score: s, detail: `آگهی حداقل ${je.name} می‌خواهد؛ بالاترین مدرک تشخیص‌داده‌شده در رزومه: ${cvMax ? EDU.find((e) => e.lvl === cvMax).name : "پیدا نشد"}${fieldNote}` };
-    } else result.components.education = { label: "مدرک تحصیلی", weight: 10, score: null, detail: "آگهی شرط مدرک مشخصی ندارد" };
+      const cvDeg = cvMax ? EDU.find((e) => e.lvl === cvMax).name : tr("پیدا نشد", "not found");
+      result.components.education = { label: tr("مدرک تحصیلی", "Education"), weight: 10, score: s, detail: tr(`آگهی حداقل ${je.name} می‌خواهد؛ بالاترین مدرک تشخیص‌داده‌شده در رزومه: ${cvDeg}`, `The ad asks for at least a ${je.name}; highest degree detected in the CV: ${cvDeg}`) + fieldNote };
+    } else result.components.education = { label: tr("مدرک تحصیلی", "Education"), weight: 10, score: null, detail: tr("آگهی شرط مدرک مشخصی ندارد", "The ad sets no specific degree requirement") };
 
     // 4. Experience years
     const jy = jdYears(jd);
@@ -584,15 +595,15 @@
         if (em.ranges) {
           const yrs = em.months / 12;
           const s = Math.min(100, Math.round((yrs / jy.years) * 100));
-          result.components.experience = { label: "سابقه کار", weight: 10, score: s, detail: `آگهی: «${jy.text}». سابقه محاسبه‌شده از بخش Experience: حدود ${yrs.toFixed(1)} سال (${em.ranges} بازه تاریخ)` };
+          result.components.experience = { label: tr("سابقه کار", "Experience"), weight: 10, score: s, detail: tr(`آگهی: «${jy.text}». سابقه محاسبه‌شده از بخش Experience: حدود ${yrs.toFixed(1)} سال (${em.ranges} بازه تاریخ)`, `Ad: \u201c${jy.text}\u201d. Experience computed from the Experience section: about ${yrs.toFixed(1)} years (${em.ranges} date ranges)`) };
         } else {
-          result.components.experience = { label: "سابقه کار", weight: 10, score: null, detail: `آگهی ${jy.years} سال سابقه می‌خواهد ولی در بخش Experience بازه تاریخی قابل خواندن پیدا نشد` };
-          result.warnings.push("تاریخ‌های بخش Experience خوانده نشد. از قالب «Jan 2022 – Present» یا «2021 – 2023» استفاده کنید.");
+          result.components.experience = { label: tr("سابقه کار", "Experience"), weight: 10, score: null, detail: tr(`آگهی ${jy.years} سال سابقه می‌خواهد ولی در بخش Experience بازه تاریخی قابل خواندن پیدا نشد`, `The ad asks for ${jy.years} years but no readable date ranges were found in the Experience section`) };
+          result.warnings.push(tr("تاریخ‌های بخش Experience خوانده نشد. از قالب «Jan 2022 – Present» یا «2021 – 2023» استفاده کنید.", "Dates in the Experience section could not be read. Use a format like \u201cJan 2022 \u2013 Present\u201d or \u201c2021 \u2013 2023\u201d."));
         }
       } else {
-        result.components.experience = { label: "سابقه کار", weight: 10, score: null, detail: `آگهی ${jy.years} سال سابقه می‌خواهد ولی بخش Experience در رزومه تشخیص داده نشد` };
+        result.components.experience = { label: tr("سابقه کار", "Experience"), weight: 10, score: null, detail: tr(`آگهی ${jy.years} سال سابقه می‌خواهد ولی بخش Experience در رزومه تشخیص داده نشد`, `The ad asks for ${jy.years} years but no Experience section was detected in the CV`) };
       }
-    } else result.components.experience = { label: "سابقه کار", weight: 10, score: null, detail: "آگهی تعداد سال سابقه مشخصی نخواسته" };
+    } else result.components.experience = { label: tr("سابقه کار", "Experience"), weight: 10, score: null, detail: tr("آگهی تعداد سال سابقه مشخصی نخواسته", "The ad does not ask for a specific number of years") };
 
     // 5. Languages
     const njd = norm(jd);
@@ -600,38 +611,38 @@
     if (jl.length) {
       const hits = jl.filter((l) => l.a.some((a) => countAlias(ncv, a)));
       const s = Math.round((hits.length / jl.length) * 100);
-      result.components.languages = { label: "زبان", weight: 10, score: s, detail: `زبان‌های آگهی: ${jl.map((l) => l.k).join("، ")}؛ در رزومه: ${hits.map((l) => l.k).join("، ") || "هیچ‌کدام"}` };
+      result.components.languages = { label: tr("زبان", "Languages"), weight: 10, score: s, detail: tr("زبان‌های آگهی: ", "Languages in the ad: ") + jl.map((l) => l.k).join(J()) + tr("؛ در رزومه: ", "; in the CV: ") + (hits.map((l) => l.k).join(J()) || tr("هیچ‌کدام", "none")) };
       jl.filter((l) => !hits.includes(l)).forEach((l) => {
         const lineHit = classifyJD(jd).find((x) => l.a.some((a) => countAlias(norm(x.line), a)));
         const lvl = lineHit ? lineHit.level : "neutral";
-        if (lvl === "pref") result.tips.push(`زبان ${l.k} در آگهی «امتیاز» حساب شده و در رزومه نیست.`);
+        if (lvl === "pref") result.tips.push(tr(`زبان ${l.k} در آگهی «امتیاز» حساب شده و در رزومه نیست.`, `${l.k} is listed as an advantage in the ad and is not in the CV.`));
       });
-      if (!sections.languages) result.tips.push("بخش جداگانه Languages با سطح هر زبان (مثلاً CEFR) خواندن را برای ATS و رکروتر راحت‌تر می‌کند.");
-    } else result.components.languages = { label: "زبان", weight: 10, score: null, detail: "آگهی شرط زبانی ندارد" };
+      if (!sections.languages) result.tips.push(tr("بخش جداگانه Languages با سطح هر زبان (مثلاً CEFR) خواندن را برای ATS و رکروتر راحت‌تر می‌کند.", "A separate Languages section with a level for each language (e.g. CEFR) is easier for ATSs and recruiters to read."));
+    } else result.components.languages = { label: tr("زبان", "Languages"), weight: 10, score: null, detail: tr("آگهی شرط زبانی ندارد", "The ad has no language requirement") };
 
     // 6. Date consistency
     const dc = dateConsistency(cv, sections, opts.now);
-    result.components.dates = { label: "سازگاری تاریخ‌ها", weight: 10, score: dc.score, detail: dc.detail };
+    result.components.dates = { label: tr("سازگاری تاریخ‌ها", "Date consistency"), weight: 10, score: dc.score, detail: dc.detail };
     result.dateIssues = dc.issues;
 
     // 7. Format and parseability
     let f = 100;
     const fNotes = [];
     const ci = contactInfo(cv);
-    if (!sections.experience) { f -= 20; fNotes.push("سرفصل Experience پیدا نشد"); }
-    if (!sections.education) { f -= 15; fNotes.push("سرفصل Education پیدا نشد"); }
-    if (!sections.skills) { f -= 15; fNotes.push("سرفصل Skills پیدا نشد"); }
-    if (!ci.email) { f -= 15; fNotes.push("ایمیل پیدا نشد"); }
-    if (!ci.phone) { f -= 5; fNotes.push("شماره تلفن پیدا نشد"); }
-    if (words < 200) { f -= 15; fNotes.push(`متن رزومه خیلی کوتاه است (${words} کلمه)`); }
+    if (!sections.experience) { f -= 20; fNotes.push(tr("سرفصل Experience پیدا نشد", "No Experience heading found")); }
+    if (!sections.education) { f -= 15; fNotes.push(tr("سرفصل Education پیدا نشد", "No Education heading found")); }
+    if (!sections.skills) { f -= 15; fNotes.push(tr("سرفصل Skills پیدا نشد", "No Skills heading found")); }
+    if (!ci.email) { f -= 15; fNotes.push(tr("ایمیل پیدا نشد", "No email found")); }
+    if (!ci.phone) { f -= 5; fNotes.push(tr("شماره تلفن پیدا نشد", "No phone number found")); }
+    if (words < 200) { f -= 15; fNotes.push(tr(`متن رزومه خیلی کوتاه است (${words} کلمه)`, `CV text is very short (${words} words)`)); }
     const pf = opts.parse || {};
-    if (pf.emptyText) { f = 0; fNotes.unshift("از فایل تقریباً متنی استخراج نشد؛ احتمالاً PDF تصویری/اسکن است و ATS آن را نمی‌خواند"); }
-    if (pf.iconGlyphs) { f -= 5; fNotes.push(`${pf.iconGlyphs} نماد آیکونی/ناشناخته در متن استخراج‌شده`); }
-    if (pf.multiColumn) { f -= 10; fNotes.push("احتمال چیدمان چندستونی (ترتیب متن ممکن است در ATS به هم بریزد)"); }
-    if (pf.tables) { f -= 10; fNotes.push(`${pf.tables} جدول در فایل Word`); }
-    if (pf.textBoxesSuspect) { f -= 5; fNotes.push("احتمال تکست‌باکس یا سربرگ"); }
+    if (pf.emptyText) { f = 0; fNotes.unshift(tr("از فایل تقریباً متنی استخراج نشد؛ احتمالاً PDF تصویری/اسکن است و ATS آن را نمی‌خواند", "Almost no text could be extracted; the PDF is probably an image/scan that an ATS cannot read")); }
+    if (pf.iconGlyphs) { f -= 5; fNotes.push(tr(`${pf.iconGlyphs} نماد آیکونی/ناشناخته در متن استخراج‌شده`, `${pf.iconGlyphs} icon/unknown glyphs in the extracted text`)); }
+    if (pf.multiColumn) { f -= 10; fNotes.push(tr("احتمال چیدمان چندستونی (ترتیب متن ممکن است در ATS به هم بریزد)", "Possible multi-column layout (text order may get scrambled in an ATS)")); }
+    if (pf.tables) { f -= 10; fNotes.push(tr(`${pf.tables} جدول در فایل Word`, `${pf.tables} table(s) in the Word file`)); }
+    if (pf.textBoxesSuspect) { f -= 5; fNotes.push(tr("احتمال تکست‌باکس یا سربرگ", "Possible text box or header")); }
     f = Math.max(0, f);
-    result.components.format = { label: "ساختار و خوانایی برای ATS", weight: 10, score: f, detail: fNotes.length ? fNotes.join("؛ ") : "سرفصل‌های استاندارد، ایمیل و تلفن پیدا شد" };
+    result.components.format = { label: tr("ساختار و خوانایی برای ATS", "Structure and ATS readability"), weight: 10, score: f, detail: fNotes.length ? fNotes.join(SEP()) : tr("سرفصل‌های استاندارد، ایمیل و تلفن پیدا شد", "Standard headings, email and phone found") };
     fNotes.forEach((n) => result.warnings.push(n));
     result.sections = Object.keys(sections);
     result.contact = ci;
@@ -662,34 +673,34 @@
       if (lh && (lh.level === "pref" || lh.level === "offer")) return;
       const req = lh ? lh.line.trim().slice(0, 120) : l.k;
       const has = l.a.some((a) => countAlias(ncv, a));
-      if (has) gate.push({ label: "زبان " + l.k, requirement: req, status: "pass", evidence: ev(new RegExp("[^\\n]*\\b(" + l.a.map(escRe).join("|") + ")\\b[^\\n]*", "i")), note: "در رزومه آمده" });
-      else gate.push({ label: "زبان " + l.k, requirement: req, status: hasLangInfo ? "fail" : "unknown", evidence: "", note: hasLangInfo ? `در فهرست زبان‌های رزومه نیست. اگر در هر سطحی بلدید، با سطحش بنویسید (مثلاً «${l.k}: A2»).` : "رزومه اطلاعات زبانی ندارد؛ بخش Languages اضافه کنید." });
+      if (has) gate.push({ key: "lang:" + l.k, label: tr("زبان ", "Language: ") + l.k, requirement: req, status: "pass", evidence: ev(new RegExp("[^\\n]*\\b(" + l.a.map(escRe).join("|") + ")\\b[^\\n]*", "i")), note: tr("در رزومه آمده", "Listed in the CV") });
+      else gate.push({ key: "lang:" + l.k, label: tr("زبان ", "Language: ") + l.k, requirement: req, status: hasLangInfo ? "fail" : "unknown", evidence: "", note: hasLangInfo ? tr(`در فهرست زبان‌های رزومه نیست. اگر در هر سطحی بلدید، با سطحش بنویسید (مثلاً «${l.k}: A2»).`, `Not in the CV's language list. If you know it at any level, add it with the level (e.g. \u201c${l.k}: A2\u201d).`) : tr("رزومه اطلاعات زبانی ندارد؛ بخش Languages اضافه کنید.", "The CV has no language information; add a Languages section.") });
     });
     // Degree
     const je = jdEducation(jd);
     if (je) {
       const cl = eduLevels(sections.education ? sections.education.text : cv);
       const cvMax = cl.length ? Math.max(...cl.map((e) => e.lvl)) : 0;
-      const req = je.phrase || ("حداقل " + je.name);
-      if (!cvMax) gate.push({ label: "مدرک تحصیلی", requirement: req, status: "unknown", evidence: "", note: "مدرکی در رزومه تشخیص داده نشد؛ عنوان مدرک را واضح بنویسید (مثلاً «MSc in …»)." });
-      else gate.push({ label: "مدرک تحصیلی", requirement: req, status: cvMax >= je.level ? "pass" : "fail", evidence: ev(EDU.find((e) => e.lvl === cvMax).re), note: cvMax >= je.level ? "سطح مدرک کافی است" : `آگهی ${je.name} می‌خواهد و بالاترین مدرک رزومه پایین‌تر است.` });
+      const req = je.phrase || (tr("حداقل ", "at least ") + je.name);
+      if (!cvMax) gate.push({ key: "degree", label: tr("مدرک تحصیلی", "Degree"), requirement: req, status: "unknown", evidence: "", note: tr("مدرکی در رزومه تشخیص داده نشد؛ عنوان مدرک را واضح بنویسید (مثلاً «MSc in …»).", "No degree detected in the CV; state the degree clearly (e.g. \u201cMSc in \u2026\u201d).") });
+      else gate.push({ key: "degree", label: tr("مدرک تحصیلی", "Degree"), requirement: req, status: cvMax >= je.level ? "pass" : "fail", evidence: ev(EDU.find((e) => e.lvl === cvMax).re), note: cvMax >= je.level ? tr("سطح مدرک کافی است", "Degree level is sufficient") : tr(`آگهی ${je.name} می‌خواهد و بالاترین مدرک رزومه پایین‌تر است.`, `The ad asks for a ${je.name} and the highest degree in the CV is lower.`) });
     }
     // Years of experience
     const jy = jdYears(jd);
     if (jy) {
       const em = sections.experience ? experienceMonths(sections.experience.text, opts.now) : { ranges: 0 };
-      if (!em.ranges) gate.push({ label: "سال‌های سابقه", requirement: jy.text, status: "unknown", evidence: "", note: "از بخش Experience تاریخ قابل‌خواندنی پیدا نشد." });
-      else { const y = em.months / 12; gate.push({ label: "سال‌های سابقه", requirement: jy.text, status: y >= jy.years ? "pass" : "fail", evidence: `حدود ${y.toFixed(1)} سال از ${em.ranges} بازه تاریخ`, note: y >= jy.years ? "کافی است" : `حدود ${y.toFixed(1)} سال محاسبه شد؛ اگر سابقه مرتبط دیگری دارید (پروژه، کارآموزی، پایان‌نامه آزمایشگاهی) با تاریخ بیاورید.` }); }
+      if (!em.ranges) gate.push({ key: "years", label: tr("سال‌های سابقه", "Years of experience"), requirement: jy.text, status: "unknown", evidence: "", note: tr("از بخش Experience تاریخ قابل‌خواندنی پیدا نشد.", "No readable dates found in the Experience section.") });
+      else { const y = em.months / 12; gate.push({ key: "years", label: tr("سال‌های سابقه", "Years of experience"), requirement: jy.text, status: y >= jy.years ? "pass" : "fail", evidence: tr(`حدود ${y.toFixed(1)} سال از ${em.ranges} بازه تاریخ`, `about ${y.toFixed(1)} years from ${em.ranges} date ranges`), note: y >= jy.years ? tr("کافی است", "Sufficient") : tr(`حدود ${y.toFixed(1)} سال محاسبه شد؛ اگر سابقه مرتبط دیگری دارید (پروژه، کارآموزی، پایان‌نامه آزمایشگاهی) با تاریخ بیاورید.`, `About ${y.toFixed(1)} years computed; if you have other relevant experience (projects, internships, lab thesis), add it with dates.`) }); }
     }
     // Work permit
     if (/work permit|right to work|residence permit|eligible to work|työlupa|oleskelulupa/i.test(jd)) {
       const e = ev(/[^\n]*(work permit|residence permit|right to work|eu citizen|permanent residen|oleskelulupa|työlupa)[^\n]*/i);
-      gate.push({ label: "مجوز کار", requirement: (lines.find((x) => /permit|right to work|eligible to work|lupa/i.test(x.line)) || { line: "work permit" }).line.trim().slice(0, 120), status: e ? "pass" : "unknown", evidence: e, note: e ? "در رزومه ذکر شده" : "در رزومه ذکر نشده؛ معمولاً یک سؤال حذفی در فرم اپلای است. پاسخ فرم را دقیق بدهید و در صورت تمایل یک خط در رزومه بیاورید." });
+      gate.push({ key: "permit", label: tr("مجوز کار", "Work permit"), requirement: (lines.find((x) => /permit|right to work|eligible to work|lupa/i.test(x.line)) || { line: "work permit" }).line.trim().slice(0, 120), status: e ? "pass" : "unknown", evidence: e, note: e ? tr("در رزومه ذکر شده", "Mentioned in the CV") : tr("در رزومه ذکر نشده؛ معمولاً یک سؤال حذفی در فرم اپلای است. پاسخ فرم را دقیق بدهید و در صورت تمایل یک خط در رزومه بیاورید.", "Not mentioned in the CV; this is usually a knockout question in the application form. Answer it accurately and optionally add a line to the CV.") });
     }
     // Driving licence
     if (/driv(?:er'?s|ing) licen[cs]e|ajokortti/i.test(jd)) {
       const e = ev(/[^\n]*(driv(?:er'?s|ing) licen[cs]e|ajokortti)[^\n]*/i);
-      gate.push({ label: "گواهینامه رانندگی", requirement: "driving licence", status: e ? "pass" : "unknown", evidence: e, note: e ? "در رزومه ذکر شده" : "در رزومه ذکر نشده؛ اگر دارید اضافه کنید." });
+      gate.push({ key: "licence", label: tr("گواهینامه رانندگی", "Driving licence"), requirement: "driving licence", status: e ? "pass" : "unknown", evidence: e, note: e ? tr("در رزومه ذکر شده", "Mentioned in the CV") : tr("در رزومه ذکر نشده؛ اگر دارید اضافه کنید.", "Not mentioned in the CV; add it if you have one.") });
     }
     return gate;
   }
@@ -704,29 +715,30 @@
   }
   const NUM_RE = /\d+(?:[.,]\d+)?\s?%?/g;
   // A suggestion is accepted only if its numbers, known skills and acronyms all appear in its cited sources.
-  function validateSuggestion(text, sourceTexts) {
+  function validateSuggestion(text, sourceTexts, lang) {
+    if (lang) LANG = lang === "en" ? "en" : "fa";
     const errors = [], warnings = [];
     const src = sourceTexts.join("\n");
     const nsrc = norm(src);
     const ntext = norm(text);
-    if (!sourceTexts.length) errors.push("بدون منبع");
+    if (!sourceTexts.length) errors.push(tr("بدون منبع", "no sources"));
     const nums = (String(text).match(NUM_RE) || []).map((x) => x.replace(/\s/g, ""));
     const srcNums = new Set((src.match(NUM_RE) || []).map((x) => x.replace(/\s/g, "").replace(",", ".")));
-    nums.forEach((n) => { if (!srcNums.has(n.replace(",", "."))) errors.push(`عدد «${n}» در منبع نیست`); });
+    nums.forEach((n) => { if (!srcNums.has(n.replace(",", "."))) errors.push(tr(`عدد «${n}» در منبع نیست`, `number \u201c${n}\u201d is not in the sources`)); });
     for (const sk of SKILLS) {
-      if (skillCount(sk, text, ntext) > 0 && skillCount(sk, src, nsrc) === 0) errors.push(`«${sk.k}» در منبع نیست`);
+      if (skillCount(sk, text, ntext) > 0 && skillCount(sk, src, nsrc) === 0) errors.push(tr(`«${sk.k}» در منبع نیست`, `\u201c${sk.k}\u201d is not in the sources`));
     }
     const srcLower = src.toLowerCase();
     const acr = new Set(String(text).match(/(?<![A-Za-z0-9])[A-Z][A-Z0-9]{1,}(?:-[A-Z0-9]+)?(?![a-z0-9])/g) || []);
-    acr.forEach((a) => { if (!srcLower.includes(a.toLowerCase())) errors.push(`«${a}» در منبع نیست`); });
+    acr.forEach((a) => { if (!srcLower.includes(a.toLowerCase())) errors.push(tr(`«${a}» در منبع نیست`, `\u201c${a}\u201d is not in the sources`)); });
     const SENIOR = /\b(led|lead|leading|managed|managing|supervised|supervising|headed|spearheaded|directed|oversaw|owned|coordinated|mentored|trained)\b/gi;
-    (String(text).match(SENIOR) || []).forEach((w) => { if (!new RegExp("\\b" + w + "\\b", "i").test(src)) warnings.push(`«${w}» نقش یا مسئولیتی را نشان می‌دهد که در منبع نیامده؛ فقط اگر واقعاً درست است نگه دارید`); });
+    (String(text).match(SENIOR) || []).forEach((w) => { if (!new RegExp("\\b" + w + "\\b", "i").test(src)) warnings.push(tr(`«${w}» نقش یا مسئولیتی را نشان می‌دهد که در منبع نیامده؛ فقط اگر واقعاً درست است نگه دارید`, `\u201c${w}\u201d implies a role or responsibility the source does not state; keep it only if it is true`)); });
     const words = String(text).replace(/^[\s•\-*]+/, "").split(/\s+/);
     words.forEach((w, i) => {
       const c = w.replace(/[^A-Za-z\-]/g, "");
       if (i === 0 || c.length < 3 || !/^[A-Z][a-z]/.test(c)) return;
       if (/[.!?:]$/.test(words[i - 1] || "")) return;
-      if (!srcLower.includes(c.toLowerCase())) warnings.push(`«${c}» در منبع نیست؛ بررسی کنید`);
+      if (!srcLower.includes(c.toLowerCase())) warnings.push(tr(`«${c}» در منبع نیست؛ بررسی کنید`, `\u201c${c}\u201d is not in the sources; check it`));
     });
     return { ok: errors.length === 0, errors: [...new Set(errors)], warnings: [...new Set(warnings)] };
   }

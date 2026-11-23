@@ -366,7 +366,8 @@ function renderImprove(){
   }).join("");
   if (impData.tips.length) h += `<div class="box tip"><h3>${esc(T("tipsH2"))}</h3><ul class="list">${impData.tips.map((t) => `<li>${esc(t)}</li>`).join("")}</ul></div>`;
   h += `<div class="card section-gap" style="background:var(--bg)"><h2>${esc(T("beforeAfter"))}</h2><div id="impCmp"></div>
-    <div class="actions"><button class="btn" id="impCopy">${esc(T("copyNew"))}</button><button class="btn ghost" id="impUse">${esc(T("useNew"))}</button><span id="impCopyMsg" class="note"></span></div>
+    <div class="actions"><button class="btn" id="impCopy">${esc(T("copyNew"))}</button><button class="btn ghost" id="impUse">${esc(T("useNew"))}</button><button class="btn ghost" id="impPdf">${esc(T("dlPdf"))}</button><span id="impCopyMsg" class="note"></span></div>
+    <div id="impPdfMsg" class="note"></div>
     <details><summary>${esc(T("fullNew"))}</summary><pre id="impText"></pre></details></div>`;
   $("impOut").innerHTML = h;
   $("impOut").querySelectorAll("input[type=checkbox][data-i]").forEach((cb) => cb.addEventListener("change", () => { impData.items[+cb.dataset.i].on = cb.checked; updateCompare(); }));
@@ -374,8 +375,35 @@ function renderImprove(){
     try { await navigator.clipboard.writeText(improvedText()); $("impCopyMsg").textContent = T("copied"); }
     catch (e) { $("impCopyMsg").textContent = T("copyFail"); }
   });
+  $("impPdf").addEventListener("click", downloadPdf);
   $("impUse").addEventListener("click", () => { $("cv").value = improvedText(); cvParse = {}; cvInfoState = { msg: "replaced" }; renderCvInfo(); $("run").click(); });
   updateCompare();
+}
+
+// Build the PDF in the browser (no API call), download it, then read it back with the same parser and re-score it.
+let pdfBusy = false;
+async function downloadPdf(){
+  if (pdfBusy) return;
+  pdfBusy = true; $("impPdf").disabled = true;
+  const msg = $("impPdfMsg");
+  msg.innerHTML = '<span class="spinner"></span> ' + esc(T("pdfBuilding"));
+  try {
+    const text = improvedText();
+    const { doc, file, dropped } = await CVPDF.build(text);
+    const buf = doc.output("arraybuffer");
+    doc.save(file);
+    const back = await readPdf(buf.slice(0));
+    const o = { title: lastInputs.title, lang: I18N.lang };
+    const sText = ATS.score(text, lastInputs.jd, o).overall;
+    const sPdf = ATS.score(back.text, lastInputs.jd, o).overall;
+    const parts = [esc(T("pdfSaved", { file }))];
+    if (back.parse.emptyText) parts.push(`<span class="err">${esc(T("pdfNoText"))}</span>`);
+    else parts.push(esc(T("pdfCheck", { a: sPdf, b: sText })) + (Math.abs(sPdf - sText) <= 2 ? " ✓" : ` <span class="err">${esc(T("pdfDiff"))}</span>`));
+    if (dropped.length) parts.push(`<span class="err">${esc(T("pdfDropped", { chars: dropped.join(" ") }))}</span>`);
+    msg.innerHTML = parts.join("<br>");
+  } catch (e) {
+    msg.innerHTML = `<span class="err">${esc(T("pdfFailed"))}${esc((e && e.message) || e)}</span>`;
+  } finally { pdfBusy = false; $("impPdf").disabled = false; }
 }
 
 function updateCompare(){

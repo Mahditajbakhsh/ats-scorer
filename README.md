@@ -12,6 +12,7 @@ Live: https://ats-scorer.mahditajbakhsh71.workers.dev
 * **File checks:** PDF and DOCX are parsed in the browser (pdf.js, mammoth). Image-only PDFs, likely multi-column layouts, tables and icon glyphs are flagged, and the extracted text is shown as an ATS parser would see it.
 * **Semantic analysis** through `/api/analyze`: an LLM checks every requirement of the ad against the CV and must quote the CV as evidence. The Anthropic API key stays on the server.
 * **CV improvement** through `/api/improve`: missing keywords are turned into questions, and only items the user confirms are used. Every suggested line must cite its source, either a numbered CV line (`L#`) or a confirmed answer (`U#`). The browser re-checks each suggestion and rejects it if it contains a number, known skill or acronym that is not in its sources; unsupported seniority words such as "led" or "managed" get a warning. Scores before and after are compared. (Idea from [ebarti/JobCtrl](https://github.com/ebarti/JobCtrl); idea only, no code.)
+* **PDF export:** the improved CV can be downloaded as a single-column PDF with real, selectable text (jsPDF, built in the browser, no API call). The PDF is read back with the same parser and re-scored to confirm nothing was lost. Only Latin characters are supported by the standard PDF font; any others are reported.
 * **Persian and English:** the whole interface, the report and the model output switch with one button. The choice is kept in the browser.
 * CVs and job ads are not stored anywhere.
 
@@ -24,6 +25,7 @@ public/            static files (Workers Static Assets)
   styles.css
   engine.js        rule-based scoring engine (no dependencies, also runs in Node)
   app.js           interface, PDF/DOCX reading, API calls
+  pdf.js           PDF export of the improved CV
 src/worker.js      /api/status, /api/analyze and /api/improve
 test/              engine tests (node --test)
 wrangler.toml
@@ -89,5 +91,5 @@ npm test                         # scoring engine tests
 
 ## Notes
 
-* pdf.js (3.11.174) and mammoth (1.6.0) are loaded from jsDelivr.
+* pdf.js (3.11.174), mammoth (1.6.0) and jsPDF (2.5.2) are loaded from jsDelivr; jsPDF only when a PDF is downloaded.
 * The weights and thresholds are design choices of this tool, not official numbers of any ATS. The real algorithms of Workday, Taleo and others are not public. Details are in the "How the score is calculated" section of the page. Use the score to compare versions of your own CV for one ad, not to predict an outcome.

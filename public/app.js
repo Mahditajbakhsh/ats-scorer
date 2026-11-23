@@ -137,9 +137,9 @@ function render(r, cvText, opts){
   const arc = $("arc");
   arc.style.stroke = colorFor(r.overall);
   arc.style.transition = "stroke-dashoffset .8s ease";
-  requestAnimationFrame(() => { arc.style.strokeDashoffset = String(452.4 * (1 - r.overall / 100)); });
-  $("band").textContent = bandFor(r.overall);
-  $("band").style.color = colorFor(r.overall);
+  requestAnimationFrame(() => { arc.style.strokeDashoffset = String(389.6 * (1 - r.overall / 100)); });
+  renderOverview();
+  renderSidebar(r);
 
   $("comps").innerHTML = Object.values(r.components).map((c) => {
     const na = c.score == null;
@@ -162,8 +162,79 @@ function render(r, cvText, opts){
   $("parsed").textContent = cvText;
   $("secs").innerHTML = r.sections.length ? r.sections.map((s) => `<bdi>${esc(s)}</bdi>`).join(T("list")) : esc(T("noneSecs"));
   if (!opts.keepImprove) { $("aiOut").innerHTML = ""; if (aiReady) $("aiStatus").textContent = ""; $("emailOut").innerHTML = ""; $("emailStatus").textContent = ""; }
-  if (!opts.noScroll) $("results").scrollIntoView({ behavior: "smooth", block: "start" });
+  if (!opts.noScroll) $("overviewCard").scrollIntoView({ behavior: "smooth", block: "start" });
 }
+
+// ---------- Overview panel (latest / previous score) ----------
+let prevSnap = null, lastRunAt = null, overviewTab = "latest";
+function firstName(cv){
+  const l = String(cv || "").split("\n").map((x) => x.trim()).find(Boolean) || "";
+  if (!/^[A-Za-zÀ-ÿ'\-]+(\s+[A-Za-zÀ-ÿ'\-]+){0,3}$/.test(l)) return "";
+  return l.split(/\s+/)[0];
+}
+function renderOverview(){
+  if (!lastResult) return;
+  const h = new Date().getHours();
+  $("greet").textContent = T("greet", { part: T(h < 12 ? "morning" : h < 18 ? "afternoon" : "evening"), name: firstName(lastInputs.cv) });
+  $("greetSub").textContent = T("greetSub");
+  $("overviewBody").hidden = false;
+  $("tabPrev").disabled = !prevSnap;
+  if (!prevSnap && overviewTab === "prev") overviewTab = "latest";
+  $("tabLatest").classList.toggle("on", overviewTab === "latest");
+  $("tabPrev").classList.toggle("on", overviewTab === "prev");
+  const prev = overviewTab === "prev";
+  const score = prev ? prevSnap.overall : lastResult.overall;
+  const t = (d) => d.toLocaleTimeString(I18N.lang === "fa" ? "fa-IR" : "en-GB", { hour: "2-digit", minute: "2-digit" });
+  $("headline").textContent = prev ? T("headlinePrev", { n: N(score), t: t(prevSnap.at) }) : T("headline", { n: N(score) });
+  $("band").textContent = bandFor(score);
+  $("band").style.color = colorFor(score);
+  let d = T(score >= 80 ? "descStrong" : score >= 65 ? "descGood" : score >= 50 ? "descMid" : "descWeak");
+  const fails = prev ? prevSnap.fails : (lastResult.gate || []).filter((g) => g.status === "fail").length;
+  if (fails) d += T("descFails", { n: N(fails), k: fails });
+  $("odesc").textContent = d;
+  $("marker").style.left = score + "%";
+  $("markerLbl").style.left = score + "%";
+  $("threshLbl").style.left = "80%";
+  $("threshLbl").style.visibility = "visible";
+  requestAnimationFrame(() => {
+    // Hide the threshold label when it would overlap the marker label (narrow screens or nearby scores).
+    const m = $("markerLbl").getBoundingClientRect(), t = $("threshLbl").getBoundingClientRect();
+    if (m.right + 8 > t.left && m.left < t.right + 8) $("threshLbl").style.visibility = "hidden";
+  });
+}
+$("tabLatest").addEventListener("click", () => { overviewTab = "latest"; renderOverview(); });
+$("tabPrev").addEventListener("click", () => { if (prevSnap) { overviewTab = "prev"; renderOverview(); } });
+
+// ---------- Sidebar: top fixes and completed checks ----------
+function renderSidebar(r){
+  const fixes = [], done = [];
+  const tenth = (x) => N(Math.round(x / 10));
+  const gate = r.gate || [];
+  if (gate.length) {
+    const f = gate.filter((g) => g.status === "fail").length;
+    if (f) fixes.push({ label: T("fixKnockout"), cnt: N(f), cls: "bad", href: "#gateCard", sev: 1e6 });
+    else done.push({ label: T("fixKnockout"), cnt: "✓", href: "#gateCard" });
+  }
+  for (const [key, c] of Object.entries(r.components)) {
+    if (c.score == null) continue;
+    const href = key === "keywords" ? "#kwCard" : "#compsCard";
+    if (c.score >= 80) { done.push({ label: c.label, cnt: tenth(c.score), href }); continue; }
+    let n = 1;
+    if (key === "keywords") n = r.keywords.filter((k) => !k.hit && !k.soft).length || 1;
+    else if (key === "dates") n = (r.dateIssues || []).length || 1;
+    else if (key === "format") n = String(c.detail).split(/[;؛]/).filter((x) => x.trim()).length || 1;
+    fixes.push({ label: key === "keywords" ? T("fixKeywords") : c.label, cnt: N(n), cls: c.score < 50 ? "bad" : "mid", href, sev: c.weight * (100 - c.score) });
+  }
+  fixes.sort((a, b) => b.sev - a.sev);
+  const row = (x, cls) => `<a class="fix" href="${x.href}"><span>${esc(x.label)}</span><span class="cnt ${cls || x.cls}">${esc(x.cnt)}</span></a>`;
+  $("fixList").innerHTML = fixes.length ? fixes.map((x) => row(x)).join("") : `<p class="sempty">${esc(T("none"))}</p>`;
+  $("doneList").innerHTML = done.map((x) => row(x, "good")).join("");
+  $("doneGroup").hidden = !done.length;
+  $("toolGroup").hidden = false;
+}
+document.querySelectorAll(".snav .navitem").forEach((a) => a.addEventListener("click", () => {
+  document.querySelectorAll(".snav .navitem").forEach((x) => x.classList.toggle("on", x === a));
+}));
 
 const GS = { pass: ["gsPass", "st-pass"], fail: ["gsFail", "st-fail"], unknown: ["gsUnknown", "st-unknown"] };
 function renderGate(gate){
@@ -196,6 +267,9 @@ $("run").addEventListener("click", () => {
   if (cv.trim().split(/\s+/).length < 30) { $("runErr").textContent = T("cvShort"); return; }
   if (jd.trim().split(/\s+/).length < 25) { $("runErr").textContent = T("jdShort"); return; }
   try {
+    if (lastResult) prevSnap = { overall: lastResult.overall, fails: (lastResult.gate || []).filter((g) => g.status === "fail").length, at: lastRunAt || new Date() };
+    lastRunAt = new Date();
+    overviewTab = "latest";
     lastInputs = { cv, jd, title: $("title").value, parse: cvParse };
     lastResult = ATS.score(cv, jd, { title: lastInputs.title, parse: cvParse, lang: I18N.lang });
     render(lastResult, cv);
@@ -203,8 +277,9 @@ $("run").addEventListener("click", () => {
 });
 
 // ---------- Language switch ----------
-$("langBtn").addEventListener("click", () => {
-  I18N.setLang(I18N.lang === "fa" ? "en" : "fa");
+$("langSel").value = I18N.lang;
+$("langSel").addEventListener("change", () => {
+  I18N.setLang($("langSel").value);
   renderCvInfo();
   showAiStatus();
   if (lastInputs) {

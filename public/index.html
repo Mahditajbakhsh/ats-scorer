@@ -1,126 +1,169 @@
 <!DOCTYPE html>
-<html lang="fa" dir="rtl">
+<html lang="en" dir="ltr">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>سنجش رزومه با آگهی (شبیه‌ساز ATS)</title>
+<title>ATS Scorer</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;700;800&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/mammoth@1.6.0/mammoth.browser.min.js"></script>
 <link rel="stylesheet" href="styles.css">
 <script src="i18n.js"></script>
 </head>
 <body>
-<div class="wrap">
-  <div class="topbar">
-    <h1 data-i18n="h1">سنجش تطابق رزومه با آگهی</h1>
-    <button class="btn ghost" id="langBtn" data-i18n="langBtn" type="button">English</button>
-  </div>
-  <p class="sub" data-i18n="sub"></p>
+<header class="appbar">
+  <div class="brand"><span class="logo" aria-hidden="true"></span><span data-i18n="brand">ATS Scorer</span></div>
+  <label class="langsel"><span class="sr" data-i18n="langLabel">Language</span>
+    <select id="langSel"><option value="en">English</option><option value="fa">فارسی</option></select>
+  </label>
+</header>
 
-  <div class="grid">
-    <div class="card">
-      <h2><span class="step" data-i18n="step1">۱</span> <span data-i18n="cvH">رزومه</span></h2>
-      <div class="drop" id="cvDrop">
-        <span data-i18n="cvDrop"></span>
-        <label class="btn ghost"><span data-i18n="chooseFile"></span><input type="file" id="cvFile" accept=".pdf,.docx,.txt,.md" hidden></label>
-      </div>
-      <textarea id="cv" data-i18n-ph="cvPh"></textarea>
-      <div class="fileinfo" id="cvInfo"></div>
+<div class="shell">
+  <aside class="side">
+    <div class="sring">
+      <svg width="150" height="150" viewBox="0 0 150 150"><circle cx="75" cy="75" r="62" fill="none" stroke="var(--line)" stroke-width="10"/><circle id="arc" cx="75" cy="75" r="62" fill="none" stroke-width="10" stroke-linecap="round" stroke-dasharray="389.6" stroke-dashoffset="389.6" transform="rotate(-90 75 75)"/></svg>
+      <div class="snum"><b id="overall">–</b><span data-i18n="overallLbl">Overall</span></div>
     </div>
-    <div class="card">
-      <h2><span class="step" data-i18n="step2">۲</span> <span data-i18n="jdH">آگهی</span></h2>
-      <div class="drop" id="jdDrop">
-        <span data-i18n="jdDrop"></span>
-        <label class="btn ghost"><span data-i18n="chooseFile"></span><input type="file" id="jdFile" accept=".pdf,.docx,.txt,.md" hidden></label>
-      </div>
-      <textarea id="jd" data-i18n-ph="jdPh"></textarea>
-      <label class="small" for="title" data-i18n="titleLabel"></label>
-      <input type="text" id="title" data-i18n-ph="titlePh">
+    <nav class="snav">
+      <a class="navitem on" href="#overviewCard"><span class="ico ico-home" aria-hidden="true"></span><span data-i18n="navHome">Overview</span></a>
+      <a class="navitem" href="#inputCard"><span class="ico ico-doc" aria-hidden="true"></span><span data-i18n="navInputs">CV and job ad</span></a>
+    </nav>
+    <div class="sgroup" id="fixGroup">
+      <h4 data-i18n="topFixes">Top fixes</h4>
+      <div id="fixList"><p class="sempty" data-i18n="sideEmpty">Calculate a score to see what to fix.</p></div>
     </div>
-  </div>
+    <div class="sgroup" id="doneGroup" hidden>
+      <h4 data-i18n="completed">Completed</h4>
+      <div id="doneList"></div>
+    </div>
+    <div class="sgroup" id="toolGroup" hidden>
+      <h4 data-i18n="toolsH">Tools</h4>
+      <a class="sitem" href="#aiCard"><span data-i18n="aiShort">Semantic analysis</span></a>
+      <a class="sitem" href="#impCard"><span data-i18n="impShort">Improve the CV</span></a>
+      <a class="sitem" href="#emailCard"><span data-i18n="emailShort">Application email</span></a>
+    </div>
+  </aside>
 
-  <div class="actions">
-    <button class="btn" id="run" data-i18n="run">محاسبه نمره</button>
-    <span class="err" id="runErr"></span>
-  </div>
-
-  <div id="results">
-    <div class="top">
-      <div class="card">
-        <div class="ring"><svg width="170" height="170" viewBox="0 0 170 170"><circle cx="85" cy="85" r="72" fill="none" stroke="var(--line)" stroke-width="14"/><circle id="arc" cx="85" cy="85" r="72" fill="none" stroke-width="14" stroke-linecap="round" stroke-dasharray="452.4" stroke-dashoffset="452.4"/></svg>
-          <div class="num"><div><b id="overall">0</b><span data-i18n="of100"></span></div></div></div>
-        <div class="band" id="band"></div>
-        <p class="note" style="text-align:center;margin:6px 0 0" data-i18n="ruleScore"></p>
+  <main class="main">
+    <section class="card hero" id="overviewCard">
+      <h1 id="greet" data-i18n="h1">CV and job ad match score</h1>
+      <p class="sub" id="greetSub" data-i18n="sub"></p>
+      <div id="overviewBody" hidden>
+        <div class="otabs" role="tablist">
+          <button type="button" class="otab on" id="tabLatest" data-i18n="tabLatest">Latest score</button>
+          <button type="button" class="otab" id="tabPrev" data-i18n="tabPrev">Previous score</button>
+        </div>
+        <div class="opanel">
+          <p class="headline" id="headline"></p>
+          <p class="band" id="band"></p>
+          <p class="odesc" id="odesc"></p>
+          <div class="sbar">
+            <div class="sbar-labels"><span id="markerLbl" data-i18n="yourCv">Your CV</span><span id="threshLbl" data-i18n="threshLbl">Strong match</span></div>
+            <div class="sbar-track"><span class="sbar-marker" id="marker"></span><span class="sbar-thresh"></span></div>
+            <div class="sbar-scale"><span>0</span><span>100</span></div>
+          </div>
+          <div class="tipbox"><span class="tipicon" aria-hidden="true"></span><span data-i18n="tipText"></span></div>
+        </div>
       </div>
-      <div class="card">
+    </section>
+
+    <section class="card section-gap" id="inputCard">
+      <div class="grid">
+        <div>
+          <h2><span class="step" data-i18n="step1">1</span> <span data-i18n="cvH">CV</span></h2>
+          <div class="drop" id="cvDrop">
+            <span data-i18n="cvDrop"></span>
+            <label class="btn ghost"><span data-i18n="chooseFile"></span><input type="file" id="cvFile" accept=".pdf,.docx,.txt,.md" hidden></label>
+          </div>
+          <textarea id="cv" data-i18n-ph="cvPh"></textarea>
+          <div class="fileinfo" id="cvInfo"></div>
+        </div>
+        <div>
+          <h2><span class="step" data-i18n="step2">2</span> <span data-i18n="jdH">Job ad</span></h2>
+          <div class="drop" id="jdDrop">
+            <span data-i18n="jdDrop"></span>
+            <label class="btn ghost"><span data-i18n="chooseFile"></span><input type="file" id="jdFile" accept=".pdf,.docx,.txt,.md" hidden></label>
+          </div>
+          <textarea id="jd" data-i18n-ph="jdPh"></textarea>
+          <label class="small" for="title" data-i18n="titleLabel"></label>
+          <input type="text" id="title" data-i18n-ph="titlePh">
+        </div>
+      </div>
+      <div class="actions">
+        <button class="btn" id="run" data-i18n="run">Calculate score</button>
+        <span class="err" id="runErr"></span>
+      </div>
+    </section>
+
+    <div id="results">
+      <section class="card section-gap" id="compsCard">
         <h2 data-i18n="details"></h2>
         <div id="comps"></div>
-      </div>
+      </section>
+
+      <section class="card section-gap" id="gateCard">
+        <h2 data-i18n="gateH"></h2>
+        <p class="note" style="margin-top:0" data-i18n="gateNote"></p>
+        <div id="gateBanner"></div>
+        <div style="overflow-x:auto"><table><thead><tr><th data-i18n="gateTh1"></th><th data-i18n="gateTh2"></th><th data-i18n="gateTh3"></th><th data-i18n="gateTh4"></th></tr></thead><tbody id="gateBody"></tbody></table></div>
+      </section>
+
+      <section class="card section-gap" id="adviceCard">
+        <h2 data-i18n="adviceH"></h2>
+        <div id="advice"></div>
+      </section>
+
+      <section class="card section-gap" id="kwCard">
+        <h2 data-i18n="kwH"></h2>
+        <div class="tabs" id="kwTabs">
+          <button data-f="all" class="on" data-i18n="tabAll"></button><button data-f="miss" data-i18n="tabMiss"></button><button data-f="hit" data-i18n="tabHit"></button>
+        </div>
+        <div style="overflow-x:auto"><table><thead><tr><th data-i18n="kwTh1"></th><th data-i18n="kwTh2"></th><th data-i18n="kwTh3"></th><th data-i18n="kwTh4"></th><th data-i18n="kwTh5"></th></tr></thead><tbody id="kwBody"></tbody></table></div>
+        <p class="note" data-i18n="kwNote"></p>
+      </section>
+
+      <section class="card section-gap" id="aiCard">
+        <h2 data-i18n="aiH"></h2>
+        <p class="note" style="margin-top:0" data-i18n="aiNote"></p>
+        <div class="row" id="tokenRow" style="display:none;margin-bottom:10px"><label class="small" for="token" style="margin:0" data-i18n="token"></label><input type="password" id="token" style="max-width:260px" autocomplete="current-password"></div>
+        <button class="btn" id="aiBtn" data-i18n="aiBtn"></button>
+        <span id="aiStatus" class="note"></span>
+        <div id="aiOut"></div>
+      </section>
+
+      <section class="card section-gap" id="impCard">
+        <h2 data-i18n="impH"></h2>
+        <p class="note" style="margin-top:0" data-i18n="impNote"></p>
+        <div id="impQ"></div>
+        <label class="small" for="impExtra" data-i18n="impExtraLbl"></label>
+        <textarea id="impExtra" style="min-height:80px" data-i18n-ph="impExtraPh"></textarea>
+        <div class="actions"><button class="btn" id="impBtn" data-i18n="impBtn"></button><span id="impStatus" class="note"></span></div>
+        <div id="impOut"></div>
+      </section>
+
+      <section class="card section-gap" id="emailCard">
+        <h2 data-i18n="emailH"></h2>
+        <p class="note" style="margin-top:0" data-i18n="emailNote"></p>
+        <div class="actions" style="margin:8px 0"><button class="btn" id="emailBtn" data-i18n="emailBtn"></button><span id="emailStatus" class="note"></span></div>
+        <div id="emailOut"></div>
+      </section>
+
+      <details class="card section-gap">
+        <summary data-i18n="parsedSum"></summary>
+        <p class="note"><span data-i18n="parsedNote"></span> <span id="secs"></span></p>
+        <pre id="parsed"></pre>
+      </details>
+
+      <details class="card section-gap">
+        <summary data-i18n="methodSum"></summary>
+        <ul class="list note">
+          <li data-i18n="m1"></li><li data-i18n="m2"></li><li data-i18n="m3"></li><li data-i18n="m4"></li>
+          <li data-i18n="m5"></li><li data-i18n="m6"></li><li data-i18n="m7"></li><li data-i18n="m8"></li>
+        </ul>
+      </details>
     </div>
-
-    <div class="card section-gap" id="gateCard">
-      <h2 data-i18n="gateH"></h2>
-      <p class="note" style="margin-top:0" data-i18n="gateNote"></p>
-      <div id="gateBanner"></div>
-      <div style="overflow-x:auto"><table><thead><tr><th data-i18n="gateTh1"></th><th data-i18n="gateTh2"></th><th data-i18n="gateTh3"></th><th data-i18n="gateTh4"></th></tr></thead><tbody id="gateBody"></tbody></table></div>
-    </div>
-
-    <div class="card section-gap" id="adviceCard">
-      <h2 data-i18n="adviceH"></h2>
-      <div id="advice"></div>
-    </div>
-
-    <div class="card section-gap">
-      <h2 data-i18n="kwH"></h2>
-      <div class="tabs" id="kwTabs">
-        <button data-f="all" class="on" data-i18n="tabAll"></button><button data-f="miss" data-i18n="tabMiss"></button><button data-f="hit" data-i18n="tabHit"></button>
-      </div>
-      <div style="overflow-x:auto"><table><thead><tr><th data-i18n="kwTh1"></th><th data-i18n="kwTh2"></th><th data-i18n="kwTh3"></th><th data-i18n="kwTh4"></th><th data-i18n="kwTh5"></th></tr></thead><tbody id="kwBody"></tbody></table></div>
-      <p class="note" data-i18n="kwNote"></p>
-    </div>
-
-    <div class="card section-gap" id="aiCard">
-      <h2 data-i18n="aiH"></h2>
-      <p class="note" style="margin-top:0" data-i18n="aiNote"></p>
-      <div class="row" id="tokenRow" style="display:none;margin-bottom:10px"><label class="small" for="token" style="margin:0" data-i18n="token"></label><input type="password" id="token" style="max-width:260px" autocomplete="current-password"></div>
-      <button class="btn" id="aiBtn" data-i18n="aiBtn"></button>
-      <span id="aiStatus" class="note"></span>
-      <div id="aiOut"></div>
-    </div>
-
-    <div class="card section-gap" id="impCard">
-      <h2 data-i18n="impH"></h2>
-      <p class="note" style="margin-top:0" data-i18n="impNote"></p>
-      <div id="impQ"></div>
-      <label class="small" for="impExtra" data-i18n="impExtraLbl"></label>
-      <textarea id="impExtra" style="min-height:80px" data-i18n-ph="impExtraPh"></textarea>
-      <div class="actions"><button class="btn" id="impBtn" data-i18n="impBtn"></button><span id="impStatus" class="note"></span></div>
-      <div id="impOut"></div>
-    </div>
-
-    <div class="card section-gap" id="emailCard">
-      <h2 data-i18n="emailH"></h2>
-      <p class="note" style="margin-top:0" data-i18n="emailNote"></p>
-      <div class="actions" style="margin:8px 0"><button class="btn" id="emailBtn" data-i18n="emailBtn"></button><span id="emailStatus" class="note"></span></div>
-      <div id="emailOut"></div>
-    </div>
-
-    <details class="card section-gap">
-      <summary data-i18n="parsedSum"></summary>
-      <p class="note"><span data-i18n="parsedNote"></span> <span id="secs"></span></p>
-      <pre id="parsed"></pre>
-    </details>
-
-    <details class="card section-gap">
-      <summary data-i18n="methodSum"></summary>
-      <ul class="list note">
-        <li data-i18n="m1"></li><li data-i18n="m2"></li><li data-i18n="m3"></li><li data-i18n="m4"></li>
-        <li data-i18n="m5"></li><li data-i18n="m6"></li><li data-i18n="m7"></li><li data-i18n="m8"></li>
-      </ul>
-    </details>
-  </div>
+  </main>
 </div>
 
 <script src="engine.js"></script>

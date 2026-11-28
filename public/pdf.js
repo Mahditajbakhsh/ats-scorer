@@ -284,6 +284,17 @@
         continue;
       }
 
+      // References: the referee's name in bold, half a line between references
+      if (sectionIs(/reference|referee/)) {
+        const body = clean(t.replace(BULLET, "").replace(NUMBERED, ""), dropped);
+        const c = body.indexOf(", ");
+        const segs = c > 2 && c <= 50 ? [{ t: body.slice(0, c), s: "bold" }, { t: body.slice(c), s: "normal" }] : [{ t: body, s: "normal" }];
+        ensure(5);
+        rich(segs, M, W, 9.5);
+        y += 9.5 * PT * 0.66;
+        continue;
+      }
+
       // Bullets
       if (BULLET.test(line) || NUMBERED.test(line)) {
         const num = line.match(NUMBERED);

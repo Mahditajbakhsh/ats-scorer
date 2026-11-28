@@ -199,7 +199,7 @@ function render(r, cvText, opts){
   arc.style.transition = "stroke-dashoffset .8s ease";
   requestAnimationFrame(() => { arc.style.strokeDashoffset = String(389.6 * (1 - r.overall / 100)); });
   renderOverview();
-  renderFix(r, cvText);
+  if (!opts.keepFix) renderFix(r, cvText); else markResolved(r);
   renderSidebar(r);
 
   $("comps").innerHTML = Object.values(r.components).map((c) => {
@@ -350,15 +350,15 @@ function buildFixItems(r, cv){
   const add = (it) => { if (byId[it.id]) { if (it.why && !byId[it.id].why.includes(it.why)) byId[it.id].why.push(it.why); return; } it.why = it.why ? [it.why] : []; byId[it.id] = it; items.push(it); };
   const secItem = (name, why) => {
     const b = ATS.findBlock(cv, name);
-    add({ id: "sec-" + name, kind: "section", name, title: T("fSecH", { s: b ? b.title : SEC_NAME[name] }), lead: b ? T("fSecEdit") : T("fSecNew", { s: SEC_NAME[name] }), value: b ? b.body : "", why });
+    add({ id: "sec-" + name, kind: "section", name, missing: !b, title: T("fSecH", { s: b ? b.title : SEC_NAME[name] }), lead: b ? T("fSecEdit") : T("fSecNew", { s: SEC_NAME[name] }), value: b ? b.body : "", why });
   };
   // Knockout criteria that are not passed
   (r.gate || []).filter((g) => g.status !== "pass").forEach((g) => {
-    if (g.key.startsWith("lang:")) { const l = g.key.slice(5); add({ id: "lang-" + l.toLowerCase(), kind: "add", name: "languages", title: T("fLangH", { l }), value: "", ph: l + " (B1)", why: g.note, bad: g.status === "fail" }); }
+    if (g.key.startsWith("lang:")) { const l = g.key.slice(5); add({ id: "lang-" + l.toLowerCase(), gate: g.key, kind: "add", name: "languages", title: T("fLangH", { l }), value: "", ph: l + " (B1)", why: g.note, bad: g.status === "fail" }); }
     else if (g.key === "degree") secItem("education", g.note);
     else if (g.key === "years") secItem("experience", g.note);
-    else if (g.key === "permit") add({ id: "permit", kind: "header", title: g.label, value: "", ph: "Work permit: …", why: g.note + " " + T("fHeaderNote") });
-    else if (g.key === "licence") add({ id: "licence", kind: "header", title: g.label, value: "", ph: "Driving licence: B", why: g.note + " " + T("fHeaderNote") });
+    else if (g.key === "permit") add({ id: "permit", gate: "permit", kind: "header", title: g.label, value: "", ph: "Work permit: …", why: g.note + " " + T("fHeaderNote") });
+    else if (g.key === "licence") add({ id: "licence", gate: "licence", kind: "header", title: g.label, value: "", ph: "Driving licence: B", why: g.note + " " + T("fHeaderNote") });
   });
   // Contact details and missing standard sections
   const ci = r.contact || {};
@@ -394,61 +394,110 @@ function fixAnchorFor(key, r){
   return null;
 }
 function renderFix(r, cv){
+  liveEdit = null;
   fixItems = buildFixItems(r, cv);
   const entries = ATS.cvEntries(cv);
   const hasSummary = !!ATS.findBlock(cv, "summary");
   if (!fixItems.length) { $("fixItems").innerHTML = `<p class="note ok">${esc(T("fixNothing"))}</p>`; return; }
   $("fixItems").innerHTML = fixItems.map((it, i) => {
     let ed = "";
-    if (it.kind === "section") ed = `<textarea id="fv${i}" spellcheck="true">${esc(it.value)}</textarea>`;
+    if (it.kind === "section") ed = `<textarea id="fv${i}" data-i="${i}" spellcheck="true">${esc(it.value)}</textarea>`;
     else if (it.kind === "kw") {
       const opts = [`<option value="skills">${esc(T("tSkills"))}</option>`]
         .concat(entries.filter((e) => e.name !== "education").map((e) => `<option value="e${e.index}">${esc(T("tUnder", { t: e.text.length > 70 ? e.text.slice(0, 70) + "…" : e.text }))}</option>`))
         .concat(hasSummary ? [`<option value="summary">${esc(T("tSummary"))}</option>`] : []);
-      ed = `<div class="frow"><span class="note">${esc(T("fixWhere"))}</span><select id="ft${i}">${opts.join("")}</select></div><input type="text" id="fv${i}" placeholder="${esc(it.kw)}">`;
-    } else ed = `<input type="text" id="fv${i}" value="${esc(it.value)}" placeholder="${esc(it.ph || "")}">`;
+      ed = `<div class="frow"><span class="note">${esc(T("fixWhere"))}</span><select id="ft${i}" data-i="${i}">${opts.join("")}</select></div><input type="text" id="fv${i}" data-i="${i}" placeholder="${esc(it.kw)}">`;
+    } else ed = `<input type="text" id="fv${i}" data-i="${i}" value="${esc(it.value)}" placeholder="${esc(it.ph || "")}">`;
     const tag = it.kind === "kw" ? lvTag(it.level) : it.bad ? `<span class="st st-fail">${esc(T("gsFail"))}</span>` : "";
-    return `<div class="fixitem" id="fix-${esc(it.id)}"><div class="fhead"><b>${esc(it.title)}</b>${tag}</div>
+    return `<div class="fixitem" id="fix-${esc(it.id)}"><div class="fhead"><b>${esc(it.title)}</b>${tag}<span class="fdone" id="fd${i}" hidden>${esc(T("fixDone"))}</span></div>
       ${it.lead ? `<p class="why">${esc(it.lead)}</p>` : ""}${it.why.filter(Boolean).map((w) => `<p class="why">${esc(w)}</p>`).join("")}
-      ${ed}<div class="actions"><button class="btn ghost" data-fix="${i}">${esc(T("fixApply"))}</button><span class="note" id="fm${i}"></span></div></div>`;
+      ${ed}<div class="note fmsg" id="fm${i}"></div></div>`;
   }).join("");
   fixItems.forEach((it, i) => {
-    if (it.kind === "kw") $("ft" + i).addEventListener("change", (e) => { $("fv" + i).placeholder = e.target.value === "skills" ? it.kw : T("fkPhBullet", { k: it.kw }); });
+    if (it.kind === "kw") $("ft" + i).addEventListener("change", (e) => { $("fv" + i).placeholder = e.target.value === "skills" ? it.kw : T("fkPhBullet", { k: it.kw }); liveInput(i, true); });
+    $("fv" + i).addEventListener("input", () => liveInput(i));
   });
-  $("fixItems").querySelectorAll("button[data-fix]").forEach((b) => b.addEventListener("click", () => applyFix(+b.dataset.fix)));
 }
-function applyFix(i){
-  const it = fixItems[i], val = $("fv" + i).value;
-  const cv = $("cv").value;
-  if (it.kind !== "section" && it.kind !== "headline" && !val.trim()) { $("fm" + i).innerHTML = `<span class="err">${esc(T("fixEmpty"))}</span>`; return; }
-  let next = cv;
-  if (it.kind === "section") next = ATS.setSectionBody(cv, it.name, val);
-  else if (it.kind === "add") next = ATS.addToSection(cv, it.name, val);
-  else if (it.kind === "header") next = ATS.addHeaderLine(cv, val);
-  else if (it.kind === "headline") next = ATS.setHeadline(cv, val);
-  else if (it.kind === "kw") {
-    const t = $("ft" + i).value;
-    if (t === "skills") next = ATS.addToSection(cv, "skills", val);
-    else if (t === "summary") { const b = ATS.findBlock(cv, "summary"); next = ATS.setSectionBody(cv, "summary", (b ? b.body.replace(/\s+$/, "") + (/[.!?]$/.test(b.body.trim()) ? " " : ". ") : "") + val.trim()); }
-    else next = ATS.addBulletUnder(cv, +t.slice(1), val);
-  }
-  if (next === cv) return;
-  const before = lastResult ? lastResult.overall : null;
-  fixUndo.push(cv);
-  $("cv").value = next;
-  if (runScore({ noScroll: true, keepImprove: false })) {
-    $("fixUndo").disabled = false;
-    $("fixMsg").textContent = T("fixApplied", { a: N(before), b: N(lastResult.overall) });
-    const nextItem = $("fix-" + it.id);
-    if (nextItem) { nextItem.classList.add("hl"); setTimeout(() => nextItem.classList.remove("hl"), 1600); }
-  }
+// Live editing: the text of a fix box is applied to the CV on every pause in typing and the report is recalculated.
+let liveEdit = null, liveTimer = null;
+function editFrom(base, it, i){
+  const val = $("fv" + i).value;
+  if (it.kind === "section") return it.missing && !val.trim() ? base : ATS.setSectionBody(base, it.name, val);
+  if (!val.trim()) return it.kind === "headline" ? ATS.setHeadline(base, "") : base;
+  if (it.kind === "add") return ATS.addToSection(base, it.name, val);
+  if (it.kind === "header") return ATS.addHeaderLine(base, val);
+  if (it.kind === "headline") return ATS.setHeadline(base, val);
+  const t = $("ft" + i).value;
+  if (t === "skills") return ATS.addToSection(base, "skills", val);
+  if (t === "summary") { const b = ATS.findBlock(base, "summary"); return ATS.setSectionBody(base, "summary", (b ? b.body.replace(/\s+$/, "") + (/[.!?]$/.test(b.body.trim()) ? " " : ". ") : "") + val.trim()); }
+  return ATS.addBulletUnder(base, +t.slice(1), val);
 }
+function liveInput(i, now){
+  clearTimeout(liveTimer);
+  liveTimer = setTimeout(() => {
+    if (!lastResult || !lastInputs) return;
+    if (!liveEdit || liveEdit.i !== i) {
+      // A new edit session for this box: remember the CV and score before it, for Undo and the "previous" tab.
+      liveEdit = { i, base: $("cv").value, start: lastResult.overall };
+      fixUndo.push(liveEdit.base);
+      $("fixUndo").disabled = false;
+      prevSnap = { overall: lastResult.overall, fails: (lastResult.gate || []).filter((g) => g.status === "fail").length, at: lastRunAt || new Date() };
+      lastRunAt = new Date();
+    }
+    $("fixMsg").textContent = "";
+    const next = editFrom(liveEdit.base, fixItems[i], i);
+    liveScore(next, { keepFix: true });
+    const d = lastResult.overall - liveEdit.start;
+    $("fm" + i).textContent = T("fixLiveScore", { b: N(lastResult.overall), d: (d > 0 ? "+" : "") + N(d) });
+  }, now ? 0 : 350);
+}
+function liveScore(cv, opts){
+  $("cv").value = cv;
+  lastInputs = { cv, jd: $("jd").value, title: $("title").value, parse: cvParse };
+  lastResult = ATS.score(cv, lastInputs.jd, { title: lastInputs.title, parse: cvParse, lang: I18N.lang });
+  overviewTab = "latest";
+  render(lastResult, cv, { noScroll: true, ...(opts || {}) });
+}
+function markResolved(r){
+  fixItems.forEach((it, i) => {
+    const el = $("fd" + i);
+    if (!el) return;
+    const g = it.gate && (r.gate || []).find((x) => x.key === it.gate);
+    const kw = it.kw && r.keywords.find((k) => k.name === it.kw);
+    const ok = kw ? kw.hit : g ? g.status === "pass" : it.kind === "section" && it.missing ? r.sections.includes(it.name)
+      : it.id === "title" ? r.components.title && r.components.title.score === 100 : it.id === "email" ? !!(r.contact || {}).email : it.id === "phone" ? !!(r.contact || {}).phone : false;
+    el.hidden = !ok;
+    $("fix-" + it.id).classList.toggle("solved", !!ok);
+  });
+}
+// When the user leaves the fix card, rebuild it so solved items disappear and new ones show.
+$("fixItems").addEventListener("focusout", () => setTimeout(() => {
+  if ($("fixItems").contains(document.activeElement) || !lastResult) return;
+  liveEdit = null;
+  render(lastResult, lastInputs.cv, { noScroll: true });
+}, 150));
+$("fixItems").addEventListener("focusin", (e) => { if (liveEdit && e.target.dataset && +e.target.dataset.i !== liveEdit.i) liveEdit = null; });
 $("fixUndo").addEventListener("click", () => {
   if (!fixUndo.length) return;
+  clearTimeout(liveTimer); liveEdit = null;
   $("cv").value = fixUndo.pop();
   if (runScore({ noScroll: true })) $("fixMsg").textContent = T("fixUndone", { b: N(lastResult.overall) });
   $("fixUndo").disabled = !fixUndo.length;
 });
+// Editing the CV box itself also updates the report live once a score exists.
+let cvTimer = null, cvSession = false;
+$("cv").addEventListener("input", () => {
+  if (!lastResult) return;
+  clearTimeout(cvTimer);
+  cvTimer = setTimeout(() => {
+    const cv = $("cv").value, jd = $("jd").value;
+    if (cv.trim().split(/\s+/).length < 30 || jd.trim().split(/\s+/).length < 25) return;
+    if (!cvSession) { cvSession = true; prevSnap = { overall: lastResult.overall, fails: (lastResult.gate || []).filter((g) => g.status === "fail").length, at: lastRunAt || new Date() }; lastRunAt = new Date(); }
+    $("fixMsg").textContent = "";
+    liveScore(cv);
+  }, 600);
+});
+$("cv").addEventListener("blur", () => { cvSession = false; });
 $("cvPdf").addEventListener("click", () => { if (lastInputs) exportPdf($("cv").value, $("cvPdfMsg"), $("cvPdf"), null); });
 
 // ---------- Language switch ----------

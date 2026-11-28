@@ -192,3 +192,6 @@ html[dir=rtl] .sbar-labels{letter-spacing:0}
 .fixitem select{border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink);padding:7px 8px;font:13px Inter,system-ui,sans-serif;max-width:100%;direction:ltr}
 .fixitem .actions{margin-top:8px}
 .fixitem .ok{color:var(--good)}
+.fixitem .fdone{color:var(--good);font-size:12.5px;font-weight:600}
+.fixitem.solved{border-color:var(--good)}
+.fixitem .fmsg{min-height:18px;margin-top:6px}

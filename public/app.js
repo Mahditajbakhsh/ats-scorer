@@ -142,6 +142,7 @@ function render(r, cvText, opts){
   arc.style.transition = "stroke-dashoffset .8s ease";
   requestAnimationFrame(() => { arc.style.strokeDashoffset = String(389.6 * (1 - r.overall / 100)); });
   renderOverview();
+  renderFix(r, cvText);
   renderSidebar(r);
 
   $("comps").innerHTML = Object.values(r.components).map((c) => {
@@ -215,7 +216,7 @@ function renderSidebar(r){
   const gate = r.gate || [];
   if (gate.length) {
     const f = gate.filter((g) => g.status === "fail").length;
-    if (f) fixes.push({ label: T("fixKnockout"), cnt: N(f), cls: "bad", href: "#gateCard", sev: 1e6 });
+    if (f) fixes.push({ key: "gate", label: T("fixKnockout"), cnt: N(f), cls: "bad", href: "#gateCard", sev: 1e6 });
     else done.push({ label: T("fixKnockout"), cnt: "✓", href: "#gateCard" });
   }
   for (const [key, c] of Object.entries(r.components)) {
@@ -226,9 +227,10 @@ function renderSidebar(r){
     if (key === "keywords") n = r.keywords.filter((k) => !k.hit && !k.soft).length || 1;
     else if (key === "dates") n = (r.dateIssues || []).length || 1;
     else if (key === "format") n = String(c.detail).split(/[;؛]/).filter((x) => x.trim()).length || 1;
-    fixes.push({ label: key === "keywords" ? T("fixKeywords") : c.label, cnt: N(n), cls: c.score < 50 ? "bad" : "mid", href, sev: c.weight * (100 - c.score) });
+    fixes.push({ key, label: key === "keywords" ? T("fixKeywords") : c.label, cnt: N(n), cls: c.score < 50 ? "bad" : "mid", href, sev: c.weight * (100 - c.score) });
   }
   fixes.sort((a, b) => b.sev - a.sev);
+  fixes.forEach((x) => { x.href = fixAnchorFor(x.key, r) || x.href; });
   const row = (x, cls) => `<a class="fix" href="${x.href}"><span>${esc(x.label)}</span><span class="cnt ${cls || x.cls}">${esc(x.cnt)}</span></a>`;
   $("fixList").innerHTML = fixes.length ? fixes.map((x) => row(x)).join("") : `<p class="sempty">${esc(T("none"))}</p>`;
   $("doneList").innerHTML = done.map((x) => row(x, "good")).join("");
@@ -264,25 +266,139 @@ function renderKw(f){
 }
 $("kwTabs").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) renderKw(b.dataset.f); });
 
-$("run").addEventListener("click", () => {
+function runScore(opts){
   const cv = $("cv").value, jd = $("jd").value;
   $("runErr").textContent = "";
-  if (cv.trim().split(/\s+/).length < 30) { $("runErr").textContent = T("cvShort"); return; }
-  if (jd.trim().split(/\s+/).length < 25) { $("runErr").textContent = T("jdShort"); return; }
+  if (cv.trim().split(/\s+/).length < 30) { $("runErr").textContent = T("cvShort"); return false; }
+  if (jd.trim().split(/\s+/).length < 25) { $("runErr").textContent = T("jdShort"); return false; }
   try {
     if (lastResult) prevSnap = { overall: lastResult.overall, fails: (lastResult.gate || []).filter((g) => g.status === "fail").length, at: lastRunAt || new Date() };
     lastRunAt = new Date();
     overviewTab = "latest";
     lastInputs = { cv, jd, title: $("title").value, parse: cvParse };
     lastResult = ATS.score(cv, jd, { title: lastInputs.title, parse: cvParse, lang: I18N.lang });
-    render(lastResult, cv);
-  } catch (e) { $("runErr").textContent = T("calcErr") + (e.message || e); }
+    render(lastResult, cv, opts);
+    return true;
+  } catch (e) { $("runErr").textContent = T("calcErr") + (e.message || e); return false; }
+}
+$("run").addEventListener("click", () => { fixUndo.length = 0; $("fixUndo").disabled = true; $("fixMsg").textContent = ""; runScore(); });
+
+
+// ---------- Fix in your CV: write the missing part, it goes into that exact place ----------
+const fixUndo = [];
+let fixItems = [];
+const SEC_NAME = { summary: "Profile", experience: "Experience", education: "Education", skills: "Skills", languages: "Languages" };
+function buildFixItems(r, cv){
+  const items = [], byId = {};
+  const add = (it) => { if (byId[it.id]) { if (it.why && !byId[it.id].why.includes(it.why)) byId[it.id].why.push(it.why); return; } it.why = it.why ? [it.why] : []; byId[it.id] = it; items.push(it); };
+  const secItem = (name, why) => {
+    const b = ATS.findBlock(cv, name);
+    add({ id: "sec-" + name, kind: "section", name, title: T("fSecH", { s: b ? b.title : SEC_NAME[name] }), lead: b ? T("fSecEdit") : T("fSecNew", { s: SEC_NAME[name] }), value: b ? b.body : "", why });
+  };
+  // Knockout criteria that are not passed
+  (r.gate || []).filter((g) => g.status !== "pass").forEach((g) => {
+    if (g.key.startsWith("lang:")) { const l = g.key.slice(5); add({ id: "lang-" + l.toLowerCase(), kind: "add", name: "languages", title: T("fLangH", { l }), value: "", ph: l + " (B1)", why: g.note, bad: g.status === "fail" }); }
+    else if (g.key === "degree") secItem("education", g.note);
+    else if (g.key === "years") secItem("experience", g.note);
+    else if (g.key === "permit") add({ id: "permit", kind: "header", title: g.label, value: "", ph: "Work permit: …", why: g.note + " " + T("fHeaderNote") });
+    else if (g.key === "licence") add({ id: "licence", kind: "header", title: g.label, value: "", ph: "Driving licence: B", why: g.note + " " + T("fHeaderNote") });
+  });
+  // Contact details and missing standard sections
+  const ci = r.contact || {};
+  if (!ci.email) add({ id: "email", kind: "header", title: T("fEmailH"), value: "", ph: "name@example.com", why: T("fEmailWhy") });
+  if (!ci.phone) add({ id: "phone", kind: "header", title: T("fPhoneH"), value: "", ph: "+358 40 123 4567", why: T("fPhoneWhy") });
+  ["experience", "education", "skills"].forEach((n) => { if (!r.sections.includes(n)) secItem(n, ""); });
+  // Job title / headline
+  const tc = r.components.title;
+  const adTitle = lastInputs && (lastInputs.title || ATS.guessTitle(lastInputs.jd || ""));
+  if (tc && tc.score != null && tc.score < 100 && adTitle) { const hl = ATS.getHeadline(cv); add({ id: "title", kind: "headline", title: T("fTitleH"), value: hl ? hl.text : "", ph: adTitle, why: T("fTitleWhy", { t: adTitle }) }); }
+  // Profile
+  if (!r.sections.includes("summary")) add({ id: "sec-summary", kind: "section", name: "summary", title: T("fSummaryH"), lead: T("fSecNew", { s: "Profile" }), value: "", why: T("fSummaryWhy") });
+  // Education that does not satisfy the ad
+  const ec = r.components.education;
+  if (ec && ec.score != null && ec.score < 80) secItem("education", T("fEduWhy"));
+  // Dates
+  if ((r.dateIssues || []).length) secItem(r.sections.includes("experience") ? "experience" : "education", T("fDatesWhy", { list: r.dateIssues.join(T("list")) }));
+  // Missing hard keywords, most important first
+  r.keywords.filter((k) => !k.hit && !k.soft).sort((a, b) => b.weight - a.weight).slice(0, 10).forEach((k) => {
+    add({ id: "kw-" + k.name.toLowerCase().replace(/[^a-z0-9]+/g, "-"), kind: "kw", kw: k.name, level: k.level, title: T("fkTitle", { k: k.name }), value: "", why: T("fkWhy") });
+  });
+  return items;
+}
+function fixAnchorFor(key, r){
+  const has = (id) => fixItems.some((x) => x.id === id);
+  const first = (pre) => { const x = fixItems.find((i) => i.id.startsWith(pre)); return x ? "#fix-" + x.id : null; };
+  if (key === "keywords") return first("kw-");
+  if (key === "title") return has("title") ? "#fix-title" : null;
+  if (key === "dates" || key === "experience") return has("sec-experience") ? "#fix-sec-experience" : null;
+  if (key === "education") return has("sec-education") ? "#fix-sec-education" : null;
+  if (key === "languages") return first("lang-");
+  if (key === "format" || key === "gate") return fixItems.length ? "#fixCard" : null;
+  return null;
+}
+function renderFix(r, cv){
+  fixItems = buildFixItems(r, cv);
+  const entries = ATS.cvEntries(cv);
+  const hasSummary = !!ATS.findBlock(cv, "summary");
+  if (!fixItems.length) { $("fixItems").innerHTML = `<p class="note ok">${esc(T("fixNothing"))}</p>`; return; }
+  $("fixItems").innerHTML = fixItems.map((it, i) => {
+    let ed = "";
+    if (it.kind === "section") ed = `<textarea id="fv${i}" spellcheck="true">${esc(it.value)}</textarea>`;
+    else if (it.kind === "kw") {
+      const opts = [`<option value="skills">${esc(T("tSkills"))}</option>`]
+        .concat(entries.filter((e) => e.name !== "education").map((e) => `<option value="e${e.index}">${esc(T("tUnder", { t: e.text.length > 70 ? e.text.slice(0, 70) + "…" : e.text }))}</option>`))
+        .concat(hasSummary ? [`<option value="summary">${esc(T("tSummary"))}</option>`] : []);
+      ed = `<div class="frow"><span class="note">${esc(T("fixWhere"))}</span><select id="ft${i}">${opts.join("")}</select></div><input type="text" id="fv${i}" placeholder="${esc(it.kw)}">`;
+    } else ed = `<input type="text" id="fv${i}" value="${esc(it.value)}" placeholder="${esc(it.ph || "")}">`;
+    const tag = it.kind === "kw" ? lvTag(it.level) : it.bad ? `<span class="st st-fail">${esc(T("gsFail"))}</span>` : "";
+    return `<div class="fixitem" id="fix-${esc(it.id)}"><div class="fhead"><b>${esc(it.title)}</b>${tag}</div>
+      ${it.lead ? `<p class="why">${esc(it.lead)}</p>` : ""}${it.why.filter(Boolean).map((w) => `<p class="why">${esc(w)}</p>`).join("")}
+      ${ed}<div class="actions"><button class="btn ghost" data-fix="${i}">${esc(T("fixApply"))}</button><span class="note" id="fm${i}"></span></div></div>`;
+  }).join("");
+  fixItems.forEach((it, i) => {
+    if (it.kind === "kw") $("ft" + i).addEventListener("change", (e) => { $("fv" + i).placeholder = e.target.value === "skills" ? it.kw : T("fkPhBullet", { k: it.kw }); });
+  });
+  $("fixItems").querySelectorAll("button[data-fix]").forEach((b) => b.addEventListener("click", () => applyFix(+b.dataset.fix)));
+}
+function applyFix(i){
+  const it = fixItems[i], val = $("fv" + i).value;
+  const cv = $("cv").value;
+  if (it.kind !== "section" && it.kind !== "headline" && !val.trim()) { $("fm" + i).innerHTML = `<span class="err">${esc(T("fixEmpty"))}</span>`; return; }
+  let next = cv;
+  if (it.kind === "section") next = ATS.setSectionBody(cv, it.name, val);
+  else if (it.kind === "add") next = ATS.addToSection(cv, it.name, val);
+  else if (it.kind === "header") next = ATS.addHeaderLine(cv, val);
+  else if (it.kind === "headline") next = ATS.setHeadline(cv, val);
+  else if (it.kind === "kw") {
+    const t = $("ft" + i).value;
+    if (t === "skills") next = ATS.addToSection(cv, "skills", val);
+    else if (t === "summary") { const b = ATS.findBlock(cv, "summary"); next = ATS.setSectionBody(cv, "summary", (b ? b.body.replace(/\s+$/, "") + (/[.!?]$/.test(b.body.trim()) ? " " : ". ") : "") + val.trim()); }
+    else next = ATS.addBulletUnder(cv, +t.slice(1), val);
+  }
+  if (next === cv) return;
+  const before = lastResult ? lastResult.overall : null;
+  fixUndo.push(cv);
+  $("cv").value = next;
+  if (runScore({ noScroll: true, keepImprove: false })) {
+    $("fixUndo").disabled = false;
+    $("fixMsg").textContent = T("fixApplied", { a: N(before), b: N(lastResult.overall) });
+    const nextItem = $("fix-" + it.id);
+    if (nextItem) { nextItem.classList.add("hl"); setTimeout(() => nextItem.classList.remove("hl"), 1600); }
+  }
+}
+$("fixUndo").addEventListener("click", () => {
+  if (!fixUndo.length) return;
+  $("cv").value = fixUndo.pop();
+  if (runScore({ noScroll: true })) $("fixMsg").textContent = T("fixUndone", { b: N(lastResult.overall) });
+  $("fixUndo").disabled = !fixUndo.length;
 });
+$("cvPdf").addEventListener("click", () => { if (lastInputs) exportPdf($("cv").value, $("cvPdfMsg"), $("cvPdf"), null); });
 
 // ---------- Language switch ----------
 $("langSel").value = I18N.lang;
 $("langSel").addEventListener("change", () => {
   I18N.setLang($("langSel").value);
+  $("fixMsg").textContent = ""; $("cvPdfMsg").textContent = "";
   renderCvInfo();
   showAiStatus();
   if (lastInputs) {
@@ -507,13 +623,19 @@ function renderImprove(){
 
 // Build the PDF in the browser (no API call), download it, then read it back with the same parser and re-score it.
 let pdfBusy = false;
-async function downloadPdf(){
+function downloadPdf(){
+  // Lines of the original CV that must still be in the improved text (all except the ones deliberately replaced).
+  const picked = impData.items.filter((x) => x.on && x.v.ok);
+  const replacedIds = new Set(picked.filter((x) => x.kind === "bullet" && x.replaces).map((x) => x.replaces));
+  const sb = picked.some((x) => x.kind === "summary") ? ATS.summaryBody(lastInputs.cv) : null;
+  const kept = ATS.cvLines(lastInputs.cv).filter((l) => !replacedIds.has(l.id) && !(sb && l.index >= sb.start && l.index < sb.end)).map((l) => l.text).join("\n");
+  return exportPdf(improvedText(), $("impPdfMsg"), $("impPdf"), kept);
+}
+async function exportPdf(text, msg, btn, kept){
   if (pdfBusy) return;
-  pdfBusy = true; $("impPdf").disabled = true;
-  const msg = $("impPdfMsg");
+  pdfBusy = true; btn.disabled = true;
   msg.innerHTML = '<span class="spinner"></span> ' + esc(T("pdfBuilding"));
   try {
-    const text = improvedText();
     const { doc, file, dropped } = await CVPDF.build(text);
     const buf = doc.output("arraybuffer");
     doc.save(file);
@@ -521,12 +643,8 @@ async function downloadPdf(){
     const o = { title: lastInputs.title, lang: I18N.lang };
     const sText = ATS.score(text, lastInputs.jd, o).overall;
     const sPdf = ATS.score(back.text, lastInputs.jd, o).overall;
-    // Every line must survive: original CV -> improved text (except lines deliberately replaced), improved text -> PDF.
-    const picked = impData.items.filter((x) => x.on && x.v.ok);
-    const replacedIds = new Set(picked.filter((x) => x.kind === "bullet" && x.replaces).map((x) => x.replaces));
-    const sb = picked.some((x) => x.kind === "summary") ? ATS.summaryBody(lastInputs.cv) : null;
-    const kept = ATS.cvLines(lastInputs.cv).filter((l) => !replacedIds.has(l.id) && !(sb && l.index >= sb.start && l.index < sb.end)).map((l) => l.text).join("\n");
-    const lostCv = ATS.missingLines(kept, text);
+    // Every line must survive: the text given -> PDF, and (improve mode) the original CV -> improved text.
+    const lostCv = kept == null ? [] : ATS.missingLines(kept, text);
     const lostPdf = ATS.missingLines(text, back.text);
     const nLines = text.split("\n").filter((x) => x.trim()).length;
     const short = (arr) => arr.slice(0, 5).map((x) => "\u201c" + (x.length > 70 ? x.slice(0, 70) + "\u2026" : x) + "\u201d").join(T("list")) + (arr.length > 5 ? " \u2026" : "");
@@ -540,7 +658,7 @@ async function downloadPdf(){
     msg.innerHTML = parts.join("<br>");
   } catch (e) {
     msg.innerHTML = `<span class="err">${esc(T("pdfFailed"))}${esc((e && e.message) || e)}</span>`;
-  } finally { pdfBusy = false; $("impPdf").disabled = false; }
+  } finally { pdfBusy = false; btn.disabled = false; }
 }
 
 function updateCompare(){

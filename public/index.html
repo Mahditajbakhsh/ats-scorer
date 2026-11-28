@@ -39,6 +39,7 @@
     </div>
     <div class="sgroup" id="toolGroup" hidden>
       <h4 data-i18n="toolsH">Tools</h4>
+      <a class="sitem" href="#fixCard"><span data-i18n="fixShort">Fix in your CV</span></a>
       <a class="sitem" href="#aiCard"><span data-i18n="aiShort">Semantic analysis</span></a>
       <a class="sitem" href="#impCard"><span data-i18n="impShort">Improve the CV</span></a>
       <a class="sitem" href="#emailCard"><span data-i18n="emailShort">Application email</span></a>
@@ -97,6 +98,14 @@
     </section>
 
     <div id="results">
+      <section class="card section-gap" id="fixCard">
+        <h2 data-i18n="fixH"></h2>
+        <p class="note" style="margin-top:0" data-i18n="fixNote"></p>
+        <div class="actions"><button class="btn ghost" id="fixUndo" data-i18n="fixUndo" disabled></button><button class="btn ghost" id="cvPdf" data-i18n="cvPdf"></button><span id="fixMsg" class="note" role="status"></span></div>
+        <div id="cvPdfMsg" class="note"></div>
+        <div id="fixItems"></div>
+      </section>
+
       <section class="card section-gap" id="compsCard">
         <h2 data-i18n="details"></h2>
         <div id="comps"></div>

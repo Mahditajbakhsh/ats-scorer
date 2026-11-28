@@ -169,7 +169,27 @@
     }
 
     // ---------- parse ----------
-    const raw = String(text || "").replace(/\r/g, "").split("\n");
+    const raw0 = String(text || "").replace(/\r/g, "").split("\n");
+    // Text read from a PDF often breaks one bullet into several lines; join such continuation lines back to their bullet.
+    const raw = [];
+    raw0.forEach((l) => {
+      const prev = raw[raw.length - 1];
+      const t = l.trim();
+      const cont = prev != null && BULLET.test(prev) && t && !BULLET.test(l) && !NUMBERED.test(l) && !isHeadingText(t) && !splitDate(t) && !/^[^:]{2,38}:\s/.test(t) &&
+        (/^[a-z(]/.test(t) || /(?:[,&\/\-]|\b(?:of|and|or|the|a|an|to|in|on|for|with|by|at|from|as|using|via|into))$/i.test(prev.trim()));
+      if (cont) raw[raw.length - 1] = prev.replace(/\s+$/, "") + " " + t; else raw.push(l);
+    });
+    // A date range alone on its own line belongs to the entry it sits under (title above) or, failing that, the line below it.
+    const dateOnly = (t) => { const m = t.match(DATE_RX()); return m && t.replace(m[0], "").replace(/[\s,;|()\-–—]+/g, "") === ""; };
+    const isPlain = (t) => t && t.trim() && !BULLET.test(t) && !NUMBERED.test(t) && !isHeadingText(t.trim()) && !splitDate(t.trim()) && !dateOnly(t.trim());
+    for (let k = 1; k < raw.length; k++) {
+      const t = raw[k].trim();
+      if (!t || !dateOnly(t)) continue;
+      let j = k;
+      while (j - 1 >= 0 && k - (j - 1) <= 2 && isPlain(raw[j - 1])) j--;
+      if (j < k && j > 0) { raw[j] = raw[j].replace(/\s+$/, "") + "   " + t; raw.splice(k, 1); k--; continue; }
+      if (k + 1 < raw.length && isPlain(raw[k + 1])) { raw[k + 1] = raw[k + 1].replace(/\s+$/, "") + "   " + t; raw.splice(k, 1); k--; }
+    }
     let i = raw.findIndex((l) => l.trim());
     if (i < 0) throw new Error("empty");
     const name = clean(raw[i].trim(), dropped, true);

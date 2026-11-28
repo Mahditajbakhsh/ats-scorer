@@ -255,3 +255,40 @@ test("missingLines ignores punctuation and wrapping", () => {
   assert.deepEqual(ATS.missingLines(src, back), []);
   assert.deepEqual(ATS.missingLines(src + "\nLost line here", back), ["Lost line here"]);
 });
+
+test("in-place edits go into the right part of the CV and keep everything else", () => {
+  const before = CV;
+  const e = ATS.cvEntries(CV);
+  assert.ok(e.length >= 2 && /Research Intern/.test(e[0].text));
+  let x = ATS.addToSection(CV, "skills", "LIMS");
+  assert.match(x, /data visualization, LIMS/);
+  x = ATS.addBulletUnder(x, e[0].index, "Used ELISA to quantify cytokines");
+  const ls = x.split("\n");
+  const at = ls.findIndex((l) => l === "• Used ELISA to quantify cytokines");
+  assert.ok(at > e[0].index && /^•/.test(ls[at - 1]) && (ls[at + 1] === "" || /^\S/.test(ls[at + 1])));
+  x = ATS.addToSection(x, "languages", "Finnish (A2)");
+  assert.match(x, /Persian \(native\), Finnish \(A2\)/);
+  x = ATS.setHeadline(x, "Laboratory Scientist");
+  assert.equal(x.split("\n")[1], "Laboratory Scientist");
+  x = ATS.setHeadline(x, "Bioinformatician");
+  assert.equal(x.split("\n")[1], "Bioinformatician");
+  x = ATS.addHeaderLine(x, "Work permit: Finland");
+  assert.ok(x.split("\n").slice(0, 5).includes("Work permit: Finland"));
+  x = ATS.setSectionBody(x, "certifications", "GLP training, 2021");
+  assert.match(x, /\nCERTIFICATIONS\nGLP training, 2021\n/);
+  assert.ok(x.indexOf("CERTIFICATIONS") > x.indexOf("SKILLS") && x.indexOf("CERTIFICATIONS") < x.indexOf("LANGUAGES"));
+  x = ATS.setSectionBody(x, "summary", "New profile.");
+  assert.match(x, /PROFILE\nNew profile\.\n\nEXPERIENCE/);
+  // nothing else was lost
+  const removed = ["Molecular biologist and bioinformatician with experience in NGS data analysis and laboratory work."];
+  assert.deepEqual(ATS.missingLines(before.split("\n").filter((l) => !removed.includes(l)).join("\n"), x), []);
+  assert.equal(CV, before);
+});
+
+test("a missing section is created with a heading and the score sees it", () => {
+  const cv = CV.replace(/\nSKILLS\n[^\n]*\n/, "\n");
+  assert.ok(!ATS.findBlock(cv, "skills"));
+  const x = ATS.setSectionBody(cv, "skills", "Python, R, qPCR");
+  assert.ok(ATS.findBlock(x, "skills"));
+  assert.ok(ATS.detectSections(x).skills);
+});

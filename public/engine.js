@@ -835,6 +835,125 @@
     return String(src || "").replace(/\r/g, "").split("\n").map((x) => x.trim()).filter((x) => key(x) && !hay.includes(" " + key(x) + " "));
   }
 
+  // ---------- In-place editing: the CV as blocks (header + sections) ----------
+  const SEC_TITLE = { summary: "Profile", experience: "Experience", education: "Education", skills: "Skills", languages: "Languages", publications: "Publications", projects: "Projects", certifications: "Certifications", awards: "Awards", references: "References", additional: "Additional Information" };
+  const SEC_ORDER = ["summary", "experience", "education", "projects", "publications", "skills", "certifications", "awards", "languages", "additional", "references"];
+  const toLines = (cv) => String(cv || "").replace(/\r/g, "").split("\n");
+  function cvBlocks(cv) {
+    const ls = toLines(cv);
+    const sec = detectSections(cv);
+    const byStart = {};
+    Object.entries(sec).forEach(([k, v]) => { byStart[v.start] = k; });
+    const heads = [];
+    ls.forEach((l, i) => { if (i > 0 && (byStart[i] || isHeadingLike(l))) heads.push(i); });
+    const blocks = [{ name: "header", title: "", start: 0, bodyStart: 0, end: heads.length ? heads[0] : ls.length }];
+    heads.forEach((h, k) => blocks.push({ name: byStart[h] || null, title: ls[h].trim(), start: h, bodyStart: h + 1, end: k + 1 < heads.length ? heads[k + 1] : ls.length }));
+    blocks.forEach((b) => { b.body = ls.slice(b.bodyStart, b.end).join("\n").replace(/\s+$/, ""); });
+    return blocks;
+  }
+  function findBlock(cv, name) {
+    const bl = cvBlocks(cv);
+    return bl.find((b) => b.name === name) || (name === "additional" ? bl.find((b) => /additional|other information|personal details/i.test(b.title)) : null) || null;
+  }
+  // Replace the body of a section, or create the section (with a standard heading) in a sensible place.
+  function setSectionBody(cv, name, body) {
+    const ls = toLines(cv);
+    const bodyLines = String(body || "").replace(/\r/g, "").split("\n").map((x) => x.replace(/\s+$/, ""));
+    while (bodyLines.length && !bodyLines[bodyLines.length - 1].trim()) bodyLines.pop();
+    const b = findBlock(cv, name);
+    if (b) {
+      const tail = b.end < ls.length ? [""] : [];
+      ls.splice(b.bodyStart, b.end - b.bodyStart, ...bodyLines, ...tail);
+      return ls.join("\n").replace(/\n{3,}/g, "\n\n");
+    }
+    const bl = cvBlocks(cv);
+    const rank = (n) => { const r = SEC_ORDER.indexOf(n); return r < 0 ? 50 : r; };
+    const next = bl.slice(1).find((x) => x.name && rank(x.name) > rank(name));
+    const at = next ? next.start : ls.length;
+    const titles = bl.slice(1).map((x) => x.title).filter(Boolean);
+    const upper = titles.length && titles.every((x) => x === x.toUpperCase());
+    const head = SEC_TITLE[name] || name;
+    const block = [upper ? head.toUpperCase() : head, ...bodyLines, ""];
+    if (at > 0 && ls[at - 1] && ls[at - 1].trim()) block.unshift("");
+    ls.splice(at, 0, ...block);
+    return ls.join("\n").replace(/\n{3,}/g, "\n\n").replace(/\s+$/, "") + "\n";
+  }
+  // Add one item to a section: to the comma list in its last line (Skills) or as a new line.
+  function addToSection(cv, name, text) {
+    const t = String(text || "").trim();
+    if (!t) return cv;
+    const b = findBlock(cv, name);
+    if (!b) return setSectionBody(cv, name, t);
+    const ls = toLines(cv);
+    let last = b.end - 1;
+    while (last >= b.bodyStart && !ls[last].trim()) last--;
+    if (last < b.bodyStart) { ls.splice(b.bodyStart, 0, t); return ls.join("\n"); }
+    const L = ls[last];
+    if ((name === "skills" || name === "languages") && /,/.test(L) && !/:/.test(L) && !/^\s*[•\-*▪●◦·]\s/.test(L) && !/,/.test(t)) ls[last] = L.replace(/[\s,;.]+$/, "") + ", " + t;
+    else ls.splice(last + 1, 0, (/^\s*[•\-*▪●◦·]\s/.test(L) && !/^\s*[•\-*▪●◦·]\s/.test(t) ? (L.match(/^\s*[•\-*▪●◦·]\s*/) || ["• "])[0] : "") + t);
+    return ls.join("\n");
+  }
+  // Job, degree or project entries: lines with a date range that are not bullets.
+  function cvEntries(cv) {
+    const ls = toLines(cv);
+    const out = [];
+    cvBlocks(cv).slice(1).forEach((b) => {
+      for (let i = b.bodyStart; i < b.end; i++) {
+        const t = ls[i];
+        if (t.trim() && !/^\s*[•\-*▪●◦·]\s/.test(t) && parseRanges(t).length) out.push({ index: i, text: t.trim(), section: b.title, name: b.name });
+      }
+    });
+    return out;
+  }
+  // Insert a bullet at the end of the entry that starts at line `index`.
+  function addBulletUnder(cv, index, text) {
+    const t = String(text || "").trim().replace(/^[\s•\-*▪●◦·]+/, "");
+    if (!t) return cv;
+    const ls = toLines(cv);
+    let i = index + 1, pre = null;
+    while (i < ls.length && ls[i].trim() && !isHeadingLike(ls[i]) && !(parseRanges(ls[i]).length && !/^\s*[•\-*▪●◦·]\s/.test(ls[i]))) {
+      const m = ls[i].match(/^\s*[•\-*▪●◦·]\s*/);
+      if (m) pre = m[0];
+      i++;
+    }
+    ls.splice(i, 0, (pre || "• ") + t);
+    return ls.join("\n");
+  }
+  function replaceLine(cv, index, text) {
+    const ls = toLines(cv);
+    if (index < 0 || index >= ls.length) return cv;
+    const t = String(text || "").replace(/\r/g, "");
+    ls.splice(index, 1, ...(t.trim() ? t.split("\n") : []));
+    return ls.join("\n");
+  }
+  // Header: name, optional headline (subtitle) line and contact lines.
+  const isContactLike = (l) => /@|https?:|www\.|linkedin|github|orcid|\+?\d[\d\s()\-.]{6,}|\|/i.test(l);
+  function getHeadline(cv) {
+    const ls = toLines(cv), h = cvBlocks(cv)[0];
+    const i = ls.findIndex((l, k) => k > 0 && k < h.end && l.trim());
+    return i > 0 && !isContactLike(ls[i]) && ls[i].trim().length <= 90 ? { index: i, text: ls[i].trim() } : null;
+  }
+  function setHeadline(cv, text) {
+    const t = String(text || "").trim();
+    const hl = getHeadline(cv);
+    if (hl) return replaceLine(cv, hl.index, t);
+    if (!t) return cv;
+    const ls = toLines(cv);
+    const nameAt = ls.findIndex((l) => l.trim());
+    ls.splice(nameAt + 1, 0, t);
+    return ls.join("\n");
+  }
+  function addHeaderLine(cv, text) {
+    const t = String(text || "").trim();
+    if (!t) return cv;
+    const ls = toLines(cv), h = cvBlocks(cv)[0];
+    let last = h.end - 1;
+    while (last > 0 && !ls[last].trim()) last--;
+    if (isContactLike(ls[last]) && isContactLike(t) && (ls[last] + t).length < 110) ls[last] = ls[last].replace(/\s+$/, "") + " | " + t;
+    else ls.splice(last + 1, 0, t);
+    return ls.join("\n");
+  }
+
   // Build the improved CV text from accepted suggestions.
   function applyImprovements(cv, picks) {
     const raw = String(cv || "").replace(/\r/g, "").split("\n");
@@ -964,5 +1083,5 @@
     return "";
   }
 
-  root.ATS = { score, extractJDKeywords, detectSections, experienceMonths, parseRanges, dateConsistency, jdYears, jdEducation, norm, SKILLS, guessTitle, hasR, cvLines, validateSuggestion, applyImprovements, buildEmailFacts, isHeadingLike, summaryBody, lostDetails, isReplaceable, checkPreserved, missingLines, validateEmail, skillCount: (k, t) => { const s = SKILLS.find((x) => x.k === k); return s ? skillCount(s, t, norm(t)) : 0; } };
+  root.ATS = { score, extractJDKeywords, detectSections, experienceMonths, parseRanges, dateConsistency, jdYears, jdEducation, norm, SKILLS, guessTitle, hasR, cvLines, validateSuggestion, applyImprovements, buildEmailFacts, isHeadingLike, summaryBody, lostDetails, isReplaceable, checkPreserved, missingLines, cvBlocks, findBlock, setSectionBody, addToSection, cvEntries, addBulletUnder, replaceLine, getHeadline, setHeadline, addHeaderLine, validateEmail, skillCount: (k, t) => { const s = SKILLS.find((x) => x.k === k); return s ? skillCount(s, t, norm(t)) : 0; } };
 })(typeof window !== "undefined" ? window : globalThis);

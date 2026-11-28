@@ -292,3 +292,10 @@ test("a missing section is created with a heading and the score sees it", () => 
   assert.ok(ATS.findBlock(x, "skills"));
   assert.ok(ATS.detectSections(x).skills);
 });
+
+test("missingLines accepts a date column moved to the right and wrapped titles", () => {
+  const src = "2024–2025   Research Intern, Vainio Group, University of Oulu\nNov 2023   Whole Genome Sequencing, Technical University of Denmark\nUnder review   Doe J. A title. Journal of Things (under review).";
+  const back = "Research Intern   2024 – 2025\nVainio Group, University of Oulu\nWhole Genome Sequencing   Nov 2023\nTechnical University of Denmark\nDoe J. A title. Journal of Things (under review).";
+  assert.deepEqual(ATS.missingLines(src, back), []);
+  assert.deepEqual(ATS.missingLines(src + "\n2019–2020   Something else entirely", back), ["2019–2020   Something else entirely"]);
+});

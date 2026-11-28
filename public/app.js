@@ -27,23 +27,42 @@ function setupPdf(){
 
 const SAME_ROW_RX = /^(?:(?:[A-Za-z]{3,9}\.?\s+)?\d{4}|\d{1,2}[\/.]\d{4})(?:\s*(?:-|\u2013|\u2014|to)\s*(?:(?:[A-Za-z]{3,9}\.?\s+)?\d{4}|\d{1,2}[\/.]\d{4}|present|current|now|ongoing))?$/i;
 
+// Words that are often shown instead of the real link address in a CV header.
+const LINK_WORDS = [["linkedin", /linkedin\.com/i], ["github", /github\.com/i], ["google scholar", /scholar\.google/i], ["researchgate", /researchgate\.net/i], ["website", /./], ["portfolio", /./], ["homepage", /./]];
+const tidyUrl = (u) => String(u).replace(/^https?:\/\//i, "").replace(/^www\./i, "").replace(/\/+$/, "");
+// A line that begins a new item and must never be glued to the line above it.
+const NEW_ITEM_RX = /^\s*(?:[•\-*▪●◦·]\s|(?:Dr|Prof|Professor|Mr|Ms|Mrs)\.?\s|\d{1,2}[.)]\s|[A-Z][A-Za-z &\/()]{1,38}:\s|(?:(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+)?(?:19|20)\d{2}\b|(?:Under review|In preparation|In press|Submitted|Accepted|Forthcoming|Preprint)\b)/;
+
 async function readPdf(buf){
   if (!setupPdf()) throw new Error(T("pdfLibErr"));
   const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
-  let out = [], splitLines = 0, multiItemLines = 0;
+  let splitLines = 0, multiItemLines = 0;
+  const pages = [];
   for (let p = 1; p <= pdf.numPages; p++) {
     const page = await pdf.getPage(p);
     const vp = page.getViewport({ scale: 1 });
     const tc = await page.getTextContent();
+    let links = [];
+    try { links = (await page.getAnnotations()).filter((a) => a.subtype === "Link" && a.url && a.rect); } catch (e) {}
     const rows = new Map();
     for (const it of tc.items) {
       if (!it.str || !it.str.trim()) { continue; }
-      const y = Math.round(it.transform[5] / 3) * 3;
+      const x = it.transform[4], yb = it.transform[5], w = it.width || 0, h = it.height || Math.abs(it.transform[3]) || 10;
+      let str = it.str;
+      // Replace "LinkedIn", "GitHub" and similar words with the address of the link drawn over them.
+      for (const [word, host] of LINK_WORDS) {
+        const k = str.toLowerCase().indexOf(word);
+        if (k < 0 || !str.length) continue;
+        const cx = x + w * (k + word.length / 2) / str.length;
+        const ln = links.find((a) => cx >= a.rect[0] - 2 && cx <= a.rect[2] + 2 && yb + h / 2 >= a.rect[1] - 3 && yb <= a.rect[3] + 3 && host.test(a.url) && !/^mailto:/i.test(a.url));
+        if (ln) str = str.slice(0, k) + tidyUrl(ln.url) + str.slice(k + word.length);
+      }
+      const y = Math.round(yb / 3) * 3;
       if (!rows.has(y)) rows.set(y, []);
-      rows.get(y).push({ x: it.transform[4], w: it.width || 0, s: it.str });
+      rows.get(y).push({ x, w: w * (str.length / Math.max(1, it.str.length)), s: str, h });
     }
-    const ys = [...rows.keys()].sort((a, b) => b - a);
-    for (const y of ys) {
+    const out = [];
+    for (const y of [...rows.keys()].sort((a, b) => b - a)) {
       const items = rows.get(y).sort((a, b) => a.x - b.x);
       let line = "", prevEnd = null, split = false;
       for (const it of items) {
@@ -57,11 +76,49 @@ async function readPdf(buf){
         prevEnd = it.x + it.w;
       }
       if (items.length > 1) { multiItemLines++; if (split) splitLines++; }
-      out.push(line.replace(/\s+$/, ""));
+      out.push({ y, x0: items[0].x, x1: prevEnd, h: Math.max(...items.map((i) => i.h)), text: line.replace(/\s+$/, "") });
     }
-    out.push("");
+    pages.push({ rows: out, width: vp.width });
   }
-  const text = out.join("\n");
+  // Drop running headers and footers: the first or last line of a page that repeats on other pages (page numbers aside).
+  const key = (t) => t.replace(/\d+/g, "#").replace(/\s+/g, " ").trim().toLowerCase();
+  const edges = {};
+  pages.forEach((pg) => { [pg.rows[0], pg.rows[pg.rows.length - 1]].forEach((r) => { if (r) edges[key(r.text)] = (edges[key(r.text)] || 0) + 1; }); });
+  const isRunning = (r) => (pages.length > 1 && edges[key(r.text)] > 1 && r.text.length < 90) || /^\s*(?:page\s*)?\d{1,3}(?:\s*(?:\/|of)\s*\d{1,3})?\s*$/i.test(r.text) || /^[^|]{2,60}\|\s*(?:page\s*)?\d{1,3}\s*$/i.test(r.text);
+  pages.forEach((pg) => {
+    if (pg.rows.length && isRunning(pg.rows[pg.rows.length - 1])) pg.rows.pop();
+    if (pg.rows.length && isRunning(pg.rows[0])) pg.rows.shift();
+  });
+  // Join lines that were only broken because they reached the right edge of the text block.
+  const lines = [];
+  pages.forEach((pg, pi) => {
+    const rights = pg.rows.filter((r) => r.text.length > 30).map((r) => r.x1).sort((a, b) => a - b);
+    const right = rights.length ? rights[Math.floor(rights.length * 0.9)] : pg.width;
+    const steps = [];
+    for (let i = 1; i < pg.rows.length; i++) steps.push(pg.rows[i - 1].y - pg.rows[i].y);
+    steps.sort((a, b) => a - b);
+    const step = steps.length ? steps[Math.floor(steps.length / 2)] : 14;
+    let cur = null;
+    for (const r of pg.rows) {
+      const nt = r.text.trim();
+      const full = cur && cur.x1 >= right - pg.width * 0.07;
+      const hanging = cur && r.x0 > cur.x0 + 5; // continuation indented under the text, e.g. after a bullet or a date column
+      const glue = cur && cur.y - r.y <= step * 1.6 && r.x0 >= cur.x0 - 2 && !NEW_ITEM_RX.test(r.text) && !ATS.isHeadingLike(r.text) &&
+        !/(?:@\S+|https?:\S+|www\.\S+)$/.test(cur.text) && !/\s{2,}\S.{0,24}$/.test(cur.text) && !/(?:(?:19|20)\d{2}|present|current|ongoing)\s*$/i.test(cur.text) &&
+        (/^[a-z(]/.test(nt) || (full && (!/[.!?]$/.test(cur.text) || hanging)));
+      if (glue) {
+        const a = cur.text, b = r.text.trim();
+        cur.text = /[a-z]-$/.test(a) && /^[a-z]/.test(b) ? a.slice(0, -1) + b : a + " " + b;
+        cur.x1 = r.x1; cur.y = r.y;
+      } else {
+        if (cur) lines.push(cur.text);
+        cur = { ...r };
+      }
+    }
+    if (cur) lines.push(cur.text);
+    if (pi < pages.length - 1) lines.push("");
+  });
+  const text = lines.join("\n");
   const chars = text.replace(/\s/g, "").length;
   return {
     text,

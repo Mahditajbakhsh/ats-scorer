@@ -829,10 +829,18 @@
     return errors;
   }
   // Lines of src whose words are not found, in order, anywhere in back (used to verify the PDF and the improved text).
+  const RANGE_RE_LEAD = /^\s*(?:(?:\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+)?\d{4}|\d{1,2}[\/.]\d{4}|\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?)\s*[\-–—]\s*(?:(?:(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+)?\d{4}|\d{1,2}[\/.]\d{4}|present|current|now|ongoing)\b/i;
   function missingLines(src, back) {
     const key = (x) => String(x || "").normalize("NFKC").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
     const hay = " " + key(back) + " ";
-    return String(src || "").replace(/\r/g, "").split("\n").map((x) => x.trim()).filter((x) => key(x) && !hay.includes(" " + key(x) + " "));
+    const found = (x) => { const k = key(x); return !k || hay.includes(" " + k + " "); };
+    // A line may be laid out in another order (a date column moved to the right), so its column parts are checked one by one.
+    const parts = (x) => x.split(/\s{2,}|\t/).flatMap((p) => { const m = p.match(RANGE_RE_LEAD); return m ? [m[0], p.slice(m[0].length)] : [p]; });
+    // Last resort: a right-aligned date or status may sit inside a wrapped line, so compare with those removed on both sides.
+    const LBL = new RegExp(RANGE_RE_LEAD.source.replace("^\\s*", "") + "|\\b(?:(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\\.?\\s+)?(?:19|20)\\d{2}\\b|\\b(?:under review|in preparation|in press|submitted|accepted|forthcoming|preprint)\\b", "gi");
+    const hay2 = " " + key(String(back || "").replace(LBL, " ")) + " ";
+    const found2 = (x) => { const k = key(x.replace(LBL, " ")); return !k || hay2.includes(" " + k + " "); };
+    return String(src || "").replace(/\r/g, "").split("\n").map((x) => x.trim()).filter((x) => key(x) && !found(x) && !parts(x).every(found) && !found2(x));
   }
 
   // ---------- In-place editing: the CV as blocks (header + sections) ----------

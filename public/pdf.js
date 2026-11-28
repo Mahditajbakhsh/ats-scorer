@@ -89,6 +89,14 @@
     const title = (before + " " + after).replace(/[\s,;|—–\-(]+$/g, "").replace(/^[\s,;|—–\-)]+/, "").replace(/\s+/g, " ").trim();
     return { title, date: m[0].replace(/\s*(-|–|—)\s*/, " – ").trim() };
   }
+  const MONW = "(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\\.?";
+  const LEAD_RX = new RegExp("^((?:" + MONW + "(?:\\s*[\\-\u2013\u2014]\\s*" + MONW + ")?\\s+)?(?:19|20)\\d{2}|Under review|In preparation|In press|Submitted|Accepted|Forthcoming|Preprint)\\s{2,}(\\S.*)$", "i");
+  function splitLead(line) {
+    const m = String(line).trim().match(LEAD_RX);
+    return m ? { label: m[1].trim(), body: m[2].trim() } : null;
+  }
+  const SMALL = new Set(["and", "of", "in", "on", "for", "the", "to", "a", "an", "at", "by", "with", "&"]);
+  const headCase = (t) => (t.length > 3 && t === t.toUpperCase() ? t.toLowerCase().split(/(\s+)/).map((w, k) => (k > 0 && SMALL.has(w) ? w : w.charAt(0).toUpperCase() + w.slice(1))).join("") : t);
   function contactKind(item) {
     const s = item.toLowerCase();
     if (/@/.test(s)) return "mail";
@@ -179,6 +187,7 @@
         (/^[a-z(]/.test(t) || /(?:[,&\/\-]|\b(?:of|and|or|the|a|an|to|in|on|for|with|by|at|from|as|using|via|into))$/i.test(prev.trim()));
       if (cont) raw[raw.length - 1] = prev.replace(/\s+$/, "") + " " + t; else raw.push(l);
     });
+    for (let k = raw.length - 1; k >= 0; k--) if (/^[^|]{2,60}\|\s*\d{1,3}\s*$/.test(raw[k].trim()) && !/@|\+?\d{6,}/.test(raw[k])) raw.splice(k, 1);
     // A date range alone on its own line belongs to the entry it sits under (title above) or, failing that, the line below it.
     const dateOnly = (t) => { const m = t.match(DATE_RX()); return m && t.replace(m[0], "").replace(/[\s,;|()\-–—]+/g, "") === ""; };
     const isPlain = (t) => t && t.trim() && !BULLET.test(t) && !NUMBERED.test(t) && !isHeadingText(t.trim()) && !splitDate(t.trim()) && !dateOnly(t.trim());
@@ -240,7 +249,7 @@
         doc.setDrawColor(NAVY[0], NAVY[1], NAVY[2]); doc.setLineWidth(0.55); doc.line(M, y, M + W, y);
         y += 1.6;
         font(SERIF, "semibold", 13.5); color(NAVY);
-        doc.text(clean(t.replace(/^([A-Z])([A-Z\s&]+)$/, (m0) => m0.length > 3 ? m0.toLowerCase().replace(/(^|\s|&)([a-z])/g, (q, a, b) => a + b.toUpperCase()) : m0), dropped, true), M + 0.5, y + 13.5 * PT * 0.85);
+        doc.text(clean(headCase(t), dropped, true), M + 0.5, y + 13.5 * PT * 0.85);
         y += 13.5 * PT * 1.1;
         doc.setDrawColor(RULE[0], RULE[1], RULE[2]); doc.setLineWidth(0.3); doc.line(M, y, M + W, y);
         y += 1.8;
@@ -250,18 +259,27 @@
       // Publications: numbered, candidate surname bold, journal italic
       if (sectionIs(/publication|paper|article/)) {
         pubNo++;
-        const body = clean(t.replace(BULLET, "").replace(NUMBERED, ""), dropped);
+        const lead = splitLead(t);
+        // The label is only shown when the reference does not already say it (keeps the reading order clean for an ATS).
+        const label = lead && !lead.body.toLowerCase().includes(lead.label.toLowerCase()) ? clean(lead.label, dropped) : "";
+        const body = clean((lead ? lead.body : t).replace(BULLET, "").replace(NUMBERED, ""), dropped);
         const marks = [];
         if (surname.length > 1) { const rx = new RegExp("\\b" + surname.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "(?:\\s+[A-Z]{1,3}\\.?)?", "g"); let m; while ((m = rx.exec(body))) marks.push([m.index, m.index + m[0].length, "bold"]); }
-        const jm = body.match(/\.\s+([A-Z][A-Za-z&:'\-\s]{3,80}?),\s+(?:vol\.?\s*\d+|\d+\s*\(|(?:19|20)\d{2})/);
-        if (jm) { const st = jm.index + jm[0].indexOf(jm[1]); marks.push([st, st + jm[1].length, "italic"]); }
+        // Journal or book title: the sentence that names a journal, or the one right after "In: editors."
+        const segs0 = []; { const rx = /(?:^|\.\s+)([A-Z][^.]*?(?:\.(?=\S)[^.]*?)*)(?=\.\s|\.?$|\s\(|;|,\s*(?:19|20)\d{2})/g; let m; while ((m = rx.exec(body))) { const st = m.index + m[0].indexOf(m[1]); segs0.push([st, st + m[1].length, m[1]]); if (rx.lastIndex === m.index) rx.lastIndex++; } }
+        let jSeg = segs0.find((g) => /\b(?:Journal|Letters|Reports|Proceedings|Transactions|Communications|Nature|Science|Cell|Bioinformatics|Genome|Nucleic|PLOS|BMC|Frontiers|Scientific|Cancer Research|Chemistry)\b/.test(g[2]) && g[2].split(/\s+/).length <= 10 && !/\b(?:Evaluation|Synthesis|Analysis|Characterization|Integrating|Overcoming|Effects?)\b/.test(g[2]));
+        const inM = body.match(/\bIn:\s[^.]+(?:\.[^.]+?)?\.\s+([A-Z][^.;]{5,140})/);
+        if (!jSeg && inM) { const st = body.indexOf(inM[1], inM.index); jSeg = [st, st + inM[1].length]; }
+        if (jSeg) { let [a0, b0] = jSeg; const tail = body.slice(a0, b0).match(/\s*\((?:under review|in press|in preparation|submitted)\)\s*$/i); if (tail) b0 -= tail[0].length; marks.push([a0, b0, "italic"]); }
         marks.sort((a, b) => a[0] - b[0]);
         const segs = []; let p = 0;
         marks.forEach(([a, b, s]) => { if (a < p) return; if (a > p) segs.push({ t: body.slice(p, a), s: "normal" }); segs.push({ t: body.slice(a, b), s }); p = b; });
         if (p < body.length) segs.push({ t: body.slice(p), s: "normal" });
         font("helvetica", "normal", 9.5); color(TEXT); ensure(5);
         doc.text(pubNo + ".", M + 1.5, y + 9.5 * PT);
-        rich(segs, M + 7, W - 7, 9.5);
+        let lw = 0;
+        if (label) { font("helvetica", "italic", 9); lw = doc.getTextWidth(label) + 4; color(MUTED); doc.text(label, M + W, y + 9.5 * PT, { align: "right" }); color(TEXT); }
+        rich(segs, M + 7, W - 7 - lw, 9.5);
         y += 0.8;
         continue;
       }
@@ -274,23 +292,29 @@
         const pm = body.match(/^(.{3,45}?)\s+[–—]\s+/);
         if (pm && (sectionIs(/conference|presentation|talk|poster|award|honou?r|grant|fellowship/) || /\d{4}/.test(pm[1]))) segs = [{ t: pm[1], s: "bold" }, { t: body.slice(pm[1].length), s: "normal" }];
         font("helvetica", "normal", 9.5); color(TEXT); ensure(5);
-        if (num) doc.text(num[1] + ".", M + 2.5, y + 9.5 * PT); else { doc.setFillColor(TEXT[0], TEXT[1], TEXT[2]); doc.circle(M + 3.6, y + 9.5 * PT * 0.64, 0.5, "F"); }
+        if (num) doc.text(num[1] + ".", M + 2.5, y + 9.5 * PT); else doc.text("•", M + 2.8, y + 9.5 * PT);
         rich(segs, M + 7, W - 7, 9.5);
         y += 0.5;
         continue;
       }
 
       // Title row with right-aligned dates
-      const sd = splitDate(t);
+      let sd = splitDate(t);
+      if (!sd) { const ld = splitLead(t); if (ld) sd = { title: ld.body, date: ld.label }; }
       if (sd && sd.title) {
         y += 0.8;
         const date = clean(sd.date, dropped);
         font("helvetica", "normal", 9.5); const dw = doc.getTextWidth(date);
         ensure(9);
         const yTop = y;
-        rich(plain(sd.title, "bold"), M, W - dw - 6, 9.8);
+        let title = clean(sd.title, dropped), org = "";
+        font("helvetica", "bold", 9.8);
+        // A title that does not fit next to the date: role in bold on the date line, organisation on the next line.
+        if (doc.getTextWidth(title) > W - dw - 6) { const c = title.indexOf(", "); if (c > 2 && c <= 70) { org = title.slice(c + 2); title = title.slice(0, c); } }
+        rich([{ t: title, s: "bold" }], M, W - dw - 6, 9.8);
         font("helvetica", "normal", 9.5); color(TEXT);
         doc.text(date, M + W, yTop + 9.8 * PT, { align: "right" });
+        if (org) rich([{ t: org, s: "normal" }], M, W, 9.5);
         afterTitle = true;
         continue;
       }

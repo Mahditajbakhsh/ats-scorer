@@ -299,3 +299,24 @@ test("missingLines accepts a date column moved to the right and wrapped titles",
   assert.deepEqual(ATS.missingLines(src, back), []);
   assert.deepEqual(ATS.missingLines(src + "\n2019–2020   Something else entirely", back), ["2019–2020   Something else entirely"]);
 });
+
+test("ORCID, ISBN and similar numbers are not read as date ranges", () => {
+  const r = ATS.parseRanges("ORCID 0000-0003-3815-1798 | ISBN 978-0-443-45538-4 | Jan 2020 – Mar 2022 | 2018-2022").map((x) => x.raw);
+  assert.equal(r.length, 2);
+  assert.ok(!r.some((x) => /3815|1798|45538/.test(x)));
+});
+
+test("job ad keywords skip hashtags, capitalised words and the company's name", () => {
+  const jd = "Acme Biotech is hiring. At Acme Biotech we value people.\nRequirements\n• Fresh PhD OR Master's degree in molecular biology\n• Experience with CRISPR and cell culture\nAcme Biotech offers growth. #LI-ACME";
+  const names = ATS.extractJDKeywords(jd).terms.map((t) => t.name.toLowerCase());
+  for (const bad of ["or", "li", "acme", "acme biotech"]) assert.ok(!names.includes(bad), bad);
+  assert.ok(names.includes("crispr") || names.some((n) => /crispr/.test(n)));
+});
+
+test("a skill added to a Label: value Skills section goes into the Other row", () => {
+  const cv = "Jane Doe\njane@example.org\n\nSkills\nProgramming: R, Python\nWet lab: PCR\n\nLanguages\nEnglish";
+  let x = ATS.addToSection(cv, "skills", "CRISPR");
+  assert.match(x, /\nOther: CRISPR\n/);
+  x = ATS.addToSection(x, "skills", "qPCR");
+  assert.match(x, /\nOther: CRISPR, qPCR\n/);
+});

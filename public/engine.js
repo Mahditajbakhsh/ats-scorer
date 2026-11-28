@@ -156,7 +156,7 @@
 
   const STOP = new Set(("a about above after again against all also am an and any are as at be because been before being below between both but by can could did do does doing down during each few for from further had has have having he her here hers herself him himself his how i if in into is it its itself just me more most my myself no nor not now of off on once only or other our ours ourselves out over own same she should so some such than that the their theirs them themselves then there these they this those through to too under until up very was we were what when where which while who whom why will with would you your yours yourself yourselves etc e g ie i e via per within across around based including include includes well new one two three may must shall need needs needed strong good excellent great high highly relevant related required requirement requirements preferred plus advantage ability able experience experienced work working worked job role position candidate candidates applicant applicants apply application applications company team teams our we you university faculty department unit group research researcher researchers project projects year years month months day days time full part contract permanent temporary start date salary offer offers benefit benefits opportunity opportunities please send submit deadline contact information further details more like look looking seek seeking hire hiring join responsibilities responsibility tasks task duties include main key area areas field fields degree knowledge skills skill understanding familiarity background other different various wide range level levels person people help support develop development provide ensure use using used make making take part daily also based within new oulu finland finnish helsinki espoo tampere turku").split(/\s+/));
 
-  const ACRO_STOP = new Set(["EU", "CV", "PDF", "FI", "HR", "CEO", "CTO", "OY", "AB", "LTD", "INC", "PHD", "MSC", "BSC", "MS", "BA", "MA", "PH", "D", "I", "II", "III", "IV", "US", "USA", "UK", "AI", "IT", "TBD", "FAQ", "URL", "WWW", "HTTP", "HTTPS", "COM", "GMBH", "EUR", "ID", "OK", "NB", "PS", "VAT", "CET", "EET", "AM", "PM", "UTC", "DOI", "ORCID", "LINKEDIN", "THE", "AND", "FOR", "YOU", "WE", "OUR", "CEST", "EEST", "Q"]);
+  const ACRO_STOP = new Set(["OR", "AND", "NOT", "TO", "IN", "OF", "ON", "AT", "BY", "AS", "IS", "BE", "WE", "NO", "SO", "IF", "AN", "OUR", "YOU", "THE", "FOR", "LI", "NEW", "ALL", "EU", "CV", "PDF", "FI", "HR", "CEO", "CTO", "OY", "AB", "LTD", "INC", "PHD", "MSC", "BSC", "MS", "BA", "MA", "PH", "D", "I", "II", "III", "IV", "US", "USA", "UK", "AI", "IT", "TBD", "FAQ", "URL", "WWW", "HTTP", "HTTPS", "COM", "GMBH", "EUR", "ID", "OK", "NB", "PS", "VAT", "CET", "EET", "AM", "PM", "UTC", "DOI", "ORCID", "LINKEDIN", "THE", "AND", "FOR", "YOU", "WE", "OUR", "CEST", "EEST", "Q"]);
 
   // ---------- Language ----------
   let LANG = "fa";
@@ -291,7 +291,12 @@
     const aliasTokens = new Set();
     for (const s of SKILLS) for (const a of s.a) { const na = norm(a).trim(); covered.add(na); na.split(" ").forEach((w) => aliasTokens.add(w)); }
     const titleNorm = norm(guessTitle(jd)).trim();
-    const rawAll = String(jd || "");
+    const rawAll = String(jd || "").replace(/#[\w-]+/g, " ");
+    // Words that are always written with a capital letter in the ad (the company and other proper names) do not form keywords.
+    const proper = new Set();
+    { const cap = new Map(); (rawAll.match(/[A-Za-z][a-z]+/g) || []).forEach((w) => { const k = w.toLowerCase(); const c = cap.get(k) || [0, 0]; c[0]++; if (/^[A-Z]/.test(w)) c[1]++; cap.set(k, c); });
+      for (const [k, [n, up]] of cap) if (n >= 3 && up === n && !aliasTokens.has(k)) proper.add(k); }
+    const BOILER = new Set(["cutting", "edge", "ideas", "idea", "opportunity", "opportunities", "organization", "organisation", "team", "teams", "company", "environment", "culture", "career", "careers", "values", "employer", "patients", "customers", "people", "world", "future", "lives", "impact", "quality", "life", "difference", "growth", "excellence", "society", "well", "being", "home", "proud", "dynamic", "supportive", "unique", "innovative", "therapies"]);
     const levelOfText = (needleRe) => {
       let best = null;
       for (const { line, level } of lines) {
@@ -302,7 +307,7 @@
     };
     const acro = new Map();
     (rawAll.match(/(?<![A-Za-z0-9])[A-Z][A-Z0-9]{1,6}(?![A-Za-z0-9])/g) || []).forEach((a) => {
-      if (ACRO_STOP.has(a) || /^\d+$/.test(a)) return;
+      if (ACRO_STOP.has(a) || /^\d+$/.test(a) || proper.has(a.toLowerCase())) return;
       if (covered.has(a.toLowerCase()) || aliasTokens.has(a.toLowerCase())) return;
       acro.set(a, (acro.get(a) || 0) + 1);
     });
@@ -315,7 +320,7 @@
     const bg = new Map();
     for (let i = 0; i < words.length - 1; i++) {
       const w1 = words[i], w2 = words[i + 1];
-      if (STOP.has(w1) || STOP.has(w2) || w1.length < 3 || w2.length < 3 || /\d/.test(w1 + w2)) continue;
+      if (STOP.has(w1) || STOP.has(w2) || w1.length < 3 || w2.length < 3 || /\d/.test(w1 + w2) || proper.has(w1) || proper.has(w2) || BOILER.has(w1) || BOILER.has(w2) || /&/.test(w1 + w2)) continue;
       const k = w1 + " " + w2;
       bg.set(k, (bg.get(k) || 0) + 1);
     }
@@ -445,7 +450,7 @@
   // All date ranges in a text, with their formats. Invalid ones are kept and flagged.
   function parseRanges(text, nowDate) {
     const nowM = nowMonth(nowDate);
-    const t = String(text || "").replace(/[‐-―−]/g, "-");
+    const t = String(text || "").replace(/[‐-―−]/g, "-").replace(/[0-9X]+(?:-[0-9X]+){2,}/g, " ");
     const out = [];
     let m;
     RANGE_RE.lastIndex = 0;
@@ -897,6 +902,14 @@
     while (last >= b.bodyStart && !ls[last].trim()) last--;
     if (last < b.bodyStart) { ls.splice(b.bodyStart, 0, t); return ls.join("\n"); }
     const L = ls[last];
+    const KV = /^\s*[^:]{2,38}:\s/;
+    if (name === "skills" && KV.test(L) && !KV.test(t)) {
+      let o = -1;
+      for (let k = b.bodyStart; k <= last; k++) if (/^\s*(?:other|others|additional|further)\b[^:]{0,20}:\s/i.test(ls[k])) o = k;
+      if (o >= 0) ls[o] = ls[o].replace(/[\s,;.]+$/, "") + ", " + t;
+      else ls.splice(last + 1, 0, "Other: " + t);
+      return ls.join("\n");
+    }
     if ((name === "skills" || name === "languages") && /,/.test(L) && !/:/.test(L) && !/^\s*[•\-*▪●◦·]\s/.test(L) && !/,/.test(t)) ls[last] = L.replace(/[\s,;.]+$/, "") + ", " + t;
     else ls.splice(last + 1, 0, (/^\s*[•\-*▪●◦·]\s/.test(L) && !/^\s*[•\-*▪●◦·]\s/.test(t) ? (L.match(/^\s*[•\-*▪●◦·]\s*/) || ["• "])[0] : "") + t);
     return ls.join("\n");

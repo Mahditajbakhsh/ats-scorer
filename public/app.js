@@ -53,6 +53,8 @@ async function readPdf(buf){
       for (const [word, host] of LINK_WORDS) {
         const k = str.toLowerCase().indexOf(word);
         if (k < 0 || !str.length) continue;
+        // Only a word standing on its own ("LinkedIn"), not one that is already part of an address ("linkedin.com/in/...").
+        if (/[\w.\/@-]/.test(str.charAt(k + word.length)) || /[\w.\/@-]/.test(str.charAt(k - 1))) continue;
         const cx = x + w * (k + word.length / 2) / str.length;
         const ln = links.find((a) => cx >= a.rect[0] - 2 && cx <= a.rect[2] + 2 && yb + h / 2 >= a.rect[1] - 3 && yb <= a.rect[3] + 3 && host.test(a.url) && !/^mailto:/i.test(a.url));
         if (ln) str = str.slice(0, k) + tidyUrl(ln.url) + str.slice(k + word.length);

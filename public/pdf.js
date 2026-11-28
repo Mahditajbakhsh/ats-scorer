@@ -97,6 +97,18 @@
   }
   const SMALL = new Set(["and", "of", "in", "on", "for", "the", "to", "a", "an", "at", "by", "with", "&"]);
   const headCase = (t) => (t.length > 3 && t === t.toUpperCase() ? t.toLowerCase().split(/(\s+)/).map((w, k) => (k > 0 && SMALL.has(w) ? w : w.charAt(0).toUpperCase() + w.slice(1))).join("") : t);
+  const LINK_TOKEN = /^(?:https?:\/\/\S+|www\.\S+|[\w.+-]+@[\w-]+(?:\.[\w-]+)+|doi:\s?10\.\S+|10\.\d{4,9}\/\S+|(?:[a-z0-9-]+\.)+(?:com|org|net|io|fi|edu|gov|ir|de|uk|eu|se|ac\.[a-z]{2}|co\.[a-z]{2})(?:\/\S*)?)$/i;
+  function linkFor(text, kind) {
+    const t = String(text || "").trim().replace(/[.,;:)\]]+$/, "");
+    const orcid = t.match(/\b(\d{4}-\d{4}-\d{4}-\d{3}[\dX])\b/);
+    if (orcid && (kind === "orcid" || /orcid/i.test(t))) return "https://orcid.org/" + orcid[1];
+    if (kind === "phone") { const d = t.replace(/[^\d+]/g, ""); return d.length >= 7 ? "tel:" + d : null; }
+    if (!LINK_TOKEN.test(t)) return null;
+    if (/@/.test(t) && !/\//.test(t)) return "mailto:" + t;
+    if (/^doi:/i.test(t)) return "https://doi.org/" + t.replace(/^doi:\s?/i, "");
+    if (/^10\.\d{4,9}\//.test(t)) return "https://doi.org/" + t;
+    return /^https?:\/\//i.test(t) ? t : "https://" + t;
+  }
   function contactKind(item) {
     const s = item.toLowerCase();
     if (/@/.test(s)) return "mail";
@@ -136,7 +148,13 @@
     function rich(segs, x, width, size, col, lhFactor) {
       const lh = size * PT * (lhFactor || 1.32);
       const words = [];
-      segs.forEach((sg) => String(sg.t).split(/(\s+)/).forEach((w) => { if (w) words.push({ t: w, s: sg.s || "normal" }); }));
+      segs.forEach((sg) => String(sg.t).split(/(\s+)/).forEach((w) => {
+        if (!w) return;
+        const m = /^\s/.test(w) ? null : w.match(/^(.*?)([.,;:)\]]*)$/);
+        const url = m && m[1] ? linkFor(m[1]) : null;
+        if (url) { words.push({ t: m[1], s: sg.s || "normal", link: url }); if (m[2]) words.push({ t: m[2], s: sg.s || "normal" }); }
+        else words.push({ t: w, s: sg.s || "normal" });
+      }));
       const lines = [[]];
       let lineW = 0;
       for (const w of words) {
@@ -155,8 +173,14 @@
         let cx = x;
         // merge neighbouring words of the same style so text extraction keeps normal spacing
         const runs = [];
-        ln.forEach((w) => { const last = runs[runs.length - 1]; if (last && last.s === w.s) { last.t += w.t; last.w += w.w; } else runs.push({ ...w }); });
-        for (const r of runs) { font("helvetica", r.s, size); doc.text(r.t, cx, y + size * PT); cx += doc.getTextWidth(r.t.replace(/\s+$/, "")) + (/\s$/.test(r.t) ? doc.getTextWidth("n") * 0.55 : 0); }
+        ln.forEach((w) => { const last = runs[runs.length - 1]; if (last && last.s === w.s && !last.link && !w.link) { last.t += w.t; last.w += w.w; } else runs.push({ ...w }); });
+        for (const r of runs) {
+          font("helvetica", r.s, size);
+          const tw = doc.getTextWidth(r.t.replace(/\s+$/, ""));
+          if (r.link) { color(NAVY); doc.text(r.t, cx, y + size * PT); doc.link(cx, y, tw, size * PT * 1.2, { url: r.link }); color(col || TEXT); }
+          else doc.text(r.t, cx, y + size * PT);
+          cx += tw + (/\s$/.test(r.t) ? doc.getTextWidth("n") * 0.55 : 0);
+        }
         y += lh;
       }
     }
@@ -228,8 +252,11 @@
         if (k > 0 && cx + sepW + w > M + W) { cx = M; y += lh; } else if (k > 0) { color(MUTED); doc.text("  |  ", cx, y + size * PT); cx += sepW; }
         ensure(lh);
         icon(contactKind(c), cx, y + size * PT * 0.62);
-        color(TEXT); font("helvetica", "normal", size);
+        font("helvetica", "normal", size);
+        const url = linkFor(t, contactKind(c));
+        color(url && !/^tel:/.test(url) ? NAVY : TEXT);
         doc.text(t, cx + 3.8, y + size * PT);
+        if (url) doc.link(cx, y, w, size * PT * 1.25, { url });
         cx += w;
       });
       y += lh;
